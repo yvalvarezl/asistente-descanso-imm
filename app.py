@@ -1,5 +1,6 @@
 from io import BytesIO
 from datetime import datetime
+import wave
 import numpy as np
 import streamlit as st
 from gtts import gTTS
@@ -17,10 +18,35 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
+# Estilos suaves para bocina compacta y baja carga cognitiva
+# ---------------------------------------------------------
+st.markdown(
+    """
+    <style>
+    .mensaje-box {
+        background-color: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 12px;
+        padding: 0.85rem 1rem;
+        margin-bottom: 0.75rem;
+    }
+    .bocina-label {
+        font-size: 1.25rem;
+        text-align: center;
+        padding-top: 0.4rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ---------------------------------------------------------
 # Estado de sesión persistente entre ambientes
 # ---------------------------------------------------------
 if "fase_rutina" not in st.session_state:
     st.session_state.fase_rutina = "EN_CALMA"
+if "sonido_activo" not in st.session_state:
+    st.session_state.sonido_activo = None  # "arrullo" | "ruido_blanco" | None
 if "edad_meses" not in st.session_state:
     st.session_state.edad_meses = 4
 if "eventos_sueno" not in st.session_state:
@@ -33,11 +59,14 @@ if "ultimo_mensaje" not in st.session_state:
     )
 if "ultimo_estado_wokwi" not in st.session_state:
     st.session_state.ultimo_estado_wokwi = None
+if "ultimo_detalle_mqtt" not in st.session_state:
+    st.session_state.ultimo_detalle_mqtt = None
 
 
 # ---------------------------------------------------------
-# Funciones de audio y apoyo
+# Funciones de audio (voz bajo demanda + sonido en loop)
 # ---------------------------------------------------------
+@st.cache_data(show_spinner=False)
 def generar_voz_gtts(texto: str) -> bytes | None:
     try:
         tts = gTTS(text=texto, lang="es")
@@ -49,31 +78,31 @@ def generar_voz_gtts(texto: str) -> bytes | None:
         return None
 
 
-def generar_sonido_ambiente(tipo: str, duracion_seg: float = 4.0, sr: int = 16000) -> bytes:
-    """Genera audio WAV en memoria para arrullo suave o ruido blanco."""
-    import wave
-
+@st.cache_data(show_spinner=False)
+def generar_sonido_continuo(tipo: str, duracion_seg: float = 12.0, sr: int = 16000) -> bytes:
+    """Genera audio WAV continuo (periodico en los bordes para que el loop se sienta fluido)."""
     t = np.linspace(0, duracion_seg, int(sr * duracion_seg), endpoint=False)
-    if tipo == "ruido_blanco":
-        # Ruido blanco suavizado con envolvente lenta
-        rng = np.random.default_rng(42)
-        onda = rng.normal(0.0, 0.14, size=t.shape)
-        # Suavizado simple por media móvil para hacerlo menos áspero
-        kernel = np.ones(12) / 12.0
-        onda = np.convolve(onda, kernel, mode="same")
-    else:
-        # Melodía de cuna suave (acorde cálido en ondas senoidales lentas)
-        nota1 = 0.08 * np.sin(2 * np.pi * 261.63 * t)  # Do4
-        nota2 = 0.06 * np.sin(2 * np.pi * 329.63 * t)  # Mi4
-        nota3 = 0.05 * np.sin(2 * np.pi * 392.00 * t)  # Sol4
-        pulso = 0.5 + 0.5 * np.sin(2 * np.pi * 0.4 * t)
-        onda = (nota1 + nota2 + nota3) * (0.4 + 0.6 * pulso)
+    frecuencia_ciclo = 1.0 / duracion_seg  # 1 ciclo exacto en duracion_seg -> loop sin corte
 
-    # Fade in / fade out para evitar chasquidos
-    fade = min(int(0.25 * sr), len(onda) // 4)
-    if fade > 0:
-        onda[:fade] *= np.linspace(0, 1, fade)
-        onda[-fade:] *= np.linspace(1, 0, fade)
+    if tipo == "ruido_blanco":
+        rng = np.random.default_rng(42)
+        ruido = rng.normal(0.0, 0.13, size=t.shape)
+        # Suavizado para evitar agudos bruscos
+        kernel = np.ones(14) / 14.0
+        onda = np.convolve(ruido, kernel, mode="same")
+        # Respiración sutil periódica en loop
+        modulacion = 0.88 + 0.12 * np.sin(2 * np.pi * frecuencia_ciclo * t)
+        onda = onda * modulacion
+    else:
+        # Melodía de cuna suave en frecuencias armónicas exactas para loop continuo
+        f1 = round(261.63 / frecuencia_ciclo) * frecuencia_ciclo  # Do4 aprox.
+        f2 = round(329.63 / frecuencia_ciclo) * frecuencia_ciclo  # Mi4 aprox.
+        f3 = round(392.00 / frecuencia_ciclo) * frecuencia_ciclo  # Sol4 aprox.
+        arm1 = 0.075 * np.sin(2 * np.pi * f1 * t)
+        arm2 = 0.055 * np.sin(2 * np.pi * f2 * t)
+        arm3 = 0.045 * np.sin(2 * np.pi * f3 * t)
+        vaiven = 0.72 + 0.28 * np.sin(2 * np.pi * (2 * frecuencia_ciclo) * t)
+        onda = (arm1 + arm2 + arm3) * vaiven
 
     pcm = np.clip(onda * 32767, -32768, 32767).astype(np.int16)
     buf = BytesIO()
@@ -84,6 +113,39 @@ def generar_sonido_ambiente(tipo: str, duracion_seg: float = 4.0, sr: int = 1600
         wf.writeframes(pcm.tobytes())
     buf.seek(0)
     return buf.read()
+
+
+def mostrar_mensaje_con_bocina(mensaje: str):
+    """Muestra el mensaje escrito y un control compacto de bocina (🔊) para escucharlo si se desea."""
+    col_txt, col_ico, col_aud = st.columns([6.5, 0.7, 2.8], vertical_alignment="center")
+    with col_txt:
+        st.markdown(f"<div class='mensaje-box'>{mensaje}</div>", unsafe_allow_html=True)
+    with col_ico:
+        st.markdown("<div class='bocina-label'>🔊</div>", unsafe_allow_html=True)
+    with col_aud:
+        audio_voz = generar_voz_gtts(mensaje)
+        if audio_voz:
+            st.audio(audio_voz, format="audio/mp3", autoplay=False)
+
+
+def renderizar_reproductor_continuo():
+    """Muestra el audio automático en loop según el estado actual de rutina/sueño."""
+    if st.session_state.sonido_activo == "arrullo":
+        st.caption("🎶 Música de rutina activa en bucle automático:")
+        st.audio(
+            generar_sonido_continuo("arrullo"),
+            format="audio/wav",
+            autoplay=True,
+            loop=True,
+        )
+    elif st.session_state.sonido_activo == "ruido_blanco":
+        st.caption("🌊 Ruido blanco activo en bucle automático para el descanso:")
+        st.audio(
+            generar_sonido_continuo("ruido_blanco"),
+            format="audio/wav",
+            autoplay=True,
+            loop=True,
+        )
 
 
 def interpretar_intencion_sueno(texto: str) -> str:
@@ -98,14 +160,15 @@ def interpretar_intencion_sueno(texto: str) -> str:
 
 
 def registrar_evento_sueno(tipo_evento: str):
-    st.session_state.eventos_sueno.append({
-        "hora": datetime.now().strftime("%H:%M"),
-        "evento": tipo_evento,
-    })
+    st.session_state.eventos_sueno.append(
+        {
+            "hora": datetime.now().strftime("%H:%M"),
+            "evento": tipo_evento,
+        }
+    )
 
 
 def orientacion_por_edad(edad_meses: int, eventos: list[dict]) -> tuple[str, str]:
-    """Devuelve diagnóstico orientativo y sugerencia práctica según edad en meses."""
     despertares = sum(1 for e in eventos if e["evento"] == "Despertó")
     dormidas = sum(1 for e in eventos if e["evento"] == "Bebé dormido")
 
@@ -155,16 +218,19 @@ def activar_estado_cunna(estado_mqtt: str, etiqueta_evento: str | None = None):
         registrar_evento_sueno(etiqueta_evento)
 
     if estado_mqtt == "RUTINA":
+        st.session_state.sonido_activo = "arrullo"
         mensaje = (
-            "Comenzamos la rutina de sueño. Bajamos el ritmo con música suave y calma; "
+            "Comenzamos la rutina de sueño. Se activó la música suave en bucle; "
             "cuando el bebé se duerma puedes pasar a ruido blanco."
         )
     elif estado_mqtt == "DORMIDO":
+        st.session_state.sonido_activo = "ruido_blanco"
         mensaje = (
-            "Bebé dormido registrado. Activamos sonido ambiental suave tipo ruido blanco "
+            "Bebé dormido registrado. Cambiamos automáticamente a ruido blanco en bucle "
             "para acompañar su descanso."
         )
     elif estado_mqtt == "DESPIERTO":
+        st.session_state.sonido_activo = None
         mensaje = (
             "Despertar registrado con cariño. Respira profundo; aquí tienes el registro listo "
             "para acompañar el momento."
@@ -181,29 +247,22 @@ def activar_estado_cunna(estado_mqtt: str, etiqueta_evento: str | None = None):
     st.session_state.ultimo_mensaje = mensaje
 
     ok_envio, detalle_envio = enviar_comando_mqtt(estado=estado_mqtt, origen="cunna_streamlit")
+    st.session_state.ultimo_detalle_mqtt = (ok_envio, detalle_envio)
     estado_wokwi = leer_ultimo_estado_mqtt(timeout_seg=1.5)
-    st.session_state.ultimo_estado_wokwi = estado_wokwi
+    if estado_wokwi is not None:
+        st.session_state.ultimo_estado_wokwi = estado_wokwi
 
-    st.markdown(f"**Mensaje:** {mensaje}")
 
-    audio_voz = generar_voz_gtts(mensaje)
-    if audio_voz:
-        st.audio(audio_voz, format="audio/mp3")
+def renderizar_estado_mqtt():
+    if st.session_state.ultimo_detalle_mqtt:
+        ok_envio, detalle_envio = st.session_state.ultimo_detalle_mqtt
+        if ok_envio:
+            st.success(detalle_envio)
+        else:
+            st.warning(detalle_envio)
 
-    if estado_mqtt == "RUTINA":
-        st.caption("🎵 Música suave de rutina:")
-        st.audio(generar_sonido_ambiente("arrullo"), format="audio/wav")
-    elif estado_mqtt == "DORMIDO":
-        st.caption("🌊 Ruido blanco suave para el descanso:")
-        st.audio(generar_sonido_ambiente("ruido_blanco"), format="audio/wav")
-
-    if ok_envio:
-        st.success(detalle_envio)
-    else:
-        st.warning(detalle_envio)
-
-    if estado_wokwi:
-        st.info(f"Confirmación desde Wokwi ({TOPIC_ESTADO}): {estado_wokwi}")
+    if st.session_state.ultimo_estado_wokwi:
+        st.info(f"Confirmación desde Wokwi ({TOPIC_ESTADO}): {st.session_state.ultimo_estado_wokwi}")
     else:
         st.caption(
             f"Sin lectura nueva en {TOPIC_ESTADO} en este instante. "
@@ -218,7 +277,8 @@ def pagina_rutina_y_sonidos():
     st.title("🌙 CUNNA · Rutina de Sueño y Sonidos")
     st.write(
         "Un espacio pensado para momentos con las manos ocupadas o de noche: "
-        "activa la rutina, pasa a ruido blanco al dormir y recibe guía por voz y Wokwi."
+        "activa la rutina con música en bucle, pasa a ruido blanco al dormir y escucha "
+        "los mensajes solo cuando tú lo decidas."
     )
 
     st.session_state.edad_meses = st.slider(
@@ -246,8 +306,6 @@ def pagina_rutina_y_sonidos():
 
     enviar_nota = st.button("Enviar nota", type="primary", use_container_width=True)
 
-    st.divider()
-
     if btn_rutina:
         activar_estado_cunna("RUTINA", "Inicio de rutina de sueño")
     elif btn_dormido:
@@ -263,9 +321,12 @@ def pagina_rutina_y_sonidos():
             "AGUA": None,
         }
         activar_estado_cunna(intencion, etiqueta_map.get(intencion))
-    else:
-        st.write(f"**Estado actual:** `{st.session_state.fase_rutina}`")
-        st.write(f"**Último mensaje:** {st.session_state.ultimo_mensaje}")
+
+    st.divider()
+    st.caption(f"Estado actual: `{st.session_state.fase_rutina}`")
+    mostrar_mensaje_con_bocina(st.session_state.ultimo_mensaje)
+    renderizar_reproductor_continuo()
+    renderizar_estado_mqtt()
 
 
 # ---------------------------------------------------------
@@ -304,6 +365,9 @@ def pagina_monitor_y_mama():
     m1.metric("Edad del bebé", f"{st.session_state.edad_meses} meses")
     m2.metric("Despertares hoy", total_despertares)
     m3.metric("Vasos de agua (Mamá)", st.session_state.vasos_agua)
+
+    mostrar_mensaje_con_bocina(st.session_state.ultimo_mensaje)
+    renderizar_reproductor_continuo()
 
     diagnostico, sugerencia = orientacion_por_edad(
         st.session_state.edad_meses, st.session_state.eventos_sueno
