@@ -28,6 +28,19 @@ RUTA_ESTRELLITA_ASSETS = CARPETA_BASE / "assets" / "estrellita_piano.mp3"
 st.markdown(
     """
     <style>
+    .acompanando-destacado {
+        font-size: 1.32rem;
+        font-weight: 600;
+        line-height: 1.35;
+        margin-top: 0.15rem;
+        margin-bottom: 0.3rem;
+    }
+    .subexplicacion-rutina {
+        font-size: 0.98rem;
+        line-height: 1.5;
+        opacity: 0.88;
+        margin-bottom: 1.1rem;
+    }
     .mensaje-box {
         background-color: rgba(255, 255, 255, 0.04);
         border: 1px solid rgba(255, 255, 255, 0.14);
@@ -416,10 +429,14 @@ def renderizar_estado_mqtt():
 def pagina_rutina_y_sonidos():
     bebe = _etiqueta_bebe()
     st.title("🌙 CUNNA · Rutina de Sueño y Sonidos")
-    st.write(
-        f"Acompañando a {bebe} de {st.session_state.edad_meses} meses: "
-        "activa la rutina con canción de cuna en bucle, pasa a ruido blanco al dormir y escucha "
-        "los mensajes solo cuando tú lo decidas."
+    st.markdown(
+        f"<div class='acompanando-destacado'>Acompañando a {bebe} de {st.session_state.edad_meses} meses</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<div class='subexplicacion-rutina'>Activa la rutina con canción de cuna en bucle, "
+        "pasa a ruido blanco al dormir y escucha los mensajes solo cuando tú lo decidas.</div>",
+        unsafe_allow_html=True,
     )
 
     col_a, col_b, col_c = st.columns(3, gap="medium")
@@ -475,9 +492,14 @@ def pagina_rutina_y_sonidos():
 # ---------------------------------------------------------
 def pagina_monitor_y_mama():
     st.title("🤱 CUNNA · Monitor de Sueño y Cuidado de Mamá")
-    st.write(
-        f"Seguimiento {texto_acompanando_bebe()}: "
-        "resumen según las veces que se ha levantado, sugerencias orientativas y cuidado de mamá."
+    st.markdown(
+        f"<div class='acompanando-destacado'>Seguimiento {texto_acompanando_bebe()}</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<div class='subexplicacion-rutina'>Resumen según las veces que se ha levantado, "
+        "sugerencias orientativas y cuidado de mamá.</div>",
+        unsafe_allow_html=True,
     )
 
     c1, c2 = st.columns(2, gap="medium")
