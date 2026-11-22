@@ -332,6 +332,14 @@ def renderizar_transcripcion_voz():
         st.warning(st.session_state.estado_transcripcion_voz)
 
 
+def detener_sonido_bucle():
+    """Detiene manualmente el sonido activo en bucle."""
+    st.session_state.sonido_activo = None
+    st.session_state.ultimo_mensaje = (
+        f"Sonido en bucle detenido para {_etiqueta_bebe()}. Puedes activarlo cuando lo necesites."
+    )
+
+
 def renderizar_reproductor_continuo():
     """Muestra el audio automático en loop según el estado actual de rutina/sueño."""
     if st.session_state.sonido_activo == "estrellita":
@@ -361,6 +369,9 @@ def renderizar_reproductor_continuo():
                 autoplay=True,
                 loop=True,
             )
+        if st.button("⏹️ Detener sonido", key="btn_detener_sonido_estrellita"):
+            detener_sonido_bucle()
+            st.rerun()
     elif st.session_state.sonido_activo == "ruido_blanco":
         st.caption("🌊 Ruido blanco activo en bucle automático para el descanso:")
         st.audio(
@@ -369,6 +380,9 @@ def renderizar_reproductor_continuo():
             autoplay=True,
             loop=True,
         )
+        if st.button("⏹️ Detener sonido", key="btn_detener_sonido_ruido"):
+            detener_sonido_bucle()
+            st.rerun()
 
 
 def interpretar_intencion_sueno(texto: str) -> str:
@@ -581,6 +595,42 @@ def evaluar_hidratacion_y_autocuidado(vasos: int, nombre_mama: str) -> tuple[str
     return estado, mensaje, recomendaciones
 
 
+def construir_resumen_txt(
+    analisis: dict, eventos_hoy: list[dict], vasos_agua: int, estado_hidra: str
+) -> str:
+    """Genera el texto descargable del resumen del día."""
+    bebe = _etiqueta_bebe()
+    mama = _etiqueta_mama()
+    ahora_str = datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
+    lineas = [
+        "CUNNA · RESUMEN DE SUEÑO, VENTANAS Y CUIDADO",
+        f"Generado: {ahora_str}",
+        f"Bebé: {bebe} ({st.session_state.edad_meses} meses)",
+        f"Mamá: {mama} ({st.session_state.edad_mama} años)",
+        "-" * 50,
+        f"Ventana de referencia: {analisis['ventana_destacada']}",
+        f"Lectura de hoy: {analisis['estado_corto']}",
+        f"Resumen: {analisis['resumen']}",
+        f"Qué se observa: {analisis['diagnostico']}",
+        f"Para la próxima dormida: {analisis['recomendacion']}",
+        "-" * 50,
+        "Registros de hoy:",
+    ]
+    if eventos_hoy:
+        for ev in eventos_hoy:
+            lineas.append(f"  - {_hora_legible(ev)} · {ev['evento']}")
+    else:
+        lineas.append("  - Sin registros de hoy.")
+
+    lineas.extend(
+        [
+            "-" * 50,
+            f"Hidratación de {mama}: {vasos_agua} vasos registrados ({estado_hidra})",
+        ]
+    )
+    return "\n".join(lineas)
+
+
 def activar_estado_cunna(estado_mqtt: str, etiqueta_evento: str | None = None):
     st.session_state.fase_rutina = estado_mqtt
     bebe = _etiqueta_bebe()
@@ -770,14 +820,37 @@ def pagina_monitor_y_mama():
     else:
         st.caption("Aún no hay registros de hoy.")
 
-    texto_btn_hist = (
-        "🙈 Ocultar historial de registros"
-        if st.session_state.mostrar_historial_completo
-        else "📜 Ver historial de registros"
+    estado_hidra, msg_hidra, recs_mama = evaluar_hidratacion_y_autocuidado(
+        st.session_state.vasos_agua, st.session_state.nombre_mama
     )
-    if st.button(texto_btn_hist, key="btn_toggle_historial"):
-        st.session_state.mostrar_historial_completo = not st.session_state.mostrar_historial_completo
-        st.rerun()
+    resumen_txt = construir_resumen_txt(
+        analisis, eventos_hoy, st.session_state.vasos_agua, estado_hidra
+    )
+
+    col_acc1, col_acc2, col_acc3 = st.columns(3, gap="small")
+    with col_acc1:
+        texto_btn_hist = (
+            "🙈 Ocultar historial"
+            if st.session_state.mostrar_historial_completo
+            else "📜 Ver historial de registros"
+        )
+        if st.button(texto_btn_hist, key="btn_toggle_historial", use_container_width=True):
+            st.session_state.mostrar_historial_completo = not st.session_state.mostrar_historial_completo
+            st.rerun()
+
+    with col_acc2:
+        if st.button("🧹 Limpiar registros de hoy", key="btn_limpiar_hoy", use_container_width=True):
+            st.session_state.eventos_sueno = eventos_otros_dias
+            st.rerun()
+
+    with col_acc3:
+        st.download_button(
+            label="📥 Descargar resumen (.txt)",
+            data=resumen_txt,
+            file_name=f"resumen_cunna_{hoy_str}.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
 
     if st.session_state.mostrar_historial_completo:
         st.markdown("#### 📜 Historial de registros")
@@ -808,9 +881,6 @@ def pagina_monitor_y_mama():
             activar_estado_cunna("AGUA", None)
             st.rerun()
 
-    estado_hidra, msg_hidra, recs_mama = evaluar_hidratacion_y_autocuidado(
-        st.session_state.vasos_agua, st.session_state.nombre_mama
-    )
     with col_agua_eval:
         st.markdown(f"**Estado de hidratación:** {estado_hidra}")
         st.write(msg_hidra)
