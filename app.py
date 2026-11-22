@@ -101,6 +101,8 @@ if "eventos_sueno" not in st.session_state:
     st.session_state.eventos_sueno = []
 if "vasos_agua" not in st.session_state:
     st.session_state.vasos_agua = 0
+if "mostrar_historial_completo" not in st.session_state:
+    st.session_state.mostrar_historial_completo = False
 if "ultimo_mensaje" not in st.session_state:
     st.session_state.ultimo_mensaje = (
         "Bienvenida a CUNNA. Un espacio suave para acompañar el sueño y tu descanso."
@@ -327,7 +329,7 @@ def registrar_evento_sueno(tipo_evento: str):
     st.session_state.eventos_sueno.append(
         {
             "fecha": ahora.strftime("%Y-%m-%d"),
-            "hora": ahora.strftime("%H:%M"),
+            "hora": ahora.strftime("%H:%M:%S"),
             "ts": ahora.isoformat(),
             "evento": tipo_evento,
         }
@@ -343,10 +345,18 @@ def _parsear_ts(evento: dict) -> datetime | None:
     try:
         hoy = datetime.now().strftime("%Y-%m-%d")
         fecha_str = evento.get("fecha", hoy)
-        hora_str = evento.get("hora", "00:00")
-        return datetime.strptime(f"{fecha_str} {hora_str}", "%Y-%m-%d %H:%M")
+        hora_str = evento.get("hora", "00:00:00")
+        formato = "%Y-%m-%d %H:%M:%S" if len(hora_str) > 5 else "%Y-%m-%d %H:%M"
+        return datetime.strptime(f"{fecha_str} {hora_str}", formato)
     except ValueError:
         return None
+
+
+def _hora_legible(evento: dict) -> str:
+    dt = _parsear_ts(evento)
+    if dt is not None:
+        return dt.strftime("%I:%M:%S %p")
+    return evento.get("hora", "")
 
 
 def analizar_ventanas_y_sueno(
@@ -676,10 +686,43 @@ def pagina_monitor_y_mama():
         "no constituye diagnóstico médico ni reemplaza la orientación pediátrica."
     )
 
-    if st.session_state.eventos_sueno:
-        st.caption("Últimos registros de hoy:")
-        for item in reversed(st.session_state.eventos_sueno[-6:]):
-            st.write(f"- **{item['hora']}** · {item['evento']}")
+    # Solo registros de HOY visibles directamente en la página, con su hora bien clara
+    hoy_str = datetime.now().strftime("%Y-%m-%d")
+    eventos_hoy = [e for e in st.session_state.eventos_sueno if e.get("fecha") == hoy_str]
+    eventos_otros_dias = [e for e in st.session_state.eventos_sueno if e.get("fecha") != hoy_str]
+
+    st.markdown("**🕒 Registros de hoy:**")
+    if eventos_hoy:
+        for item in reversed(eventos_hoy):
+            st.write(f"- **{ _hora_legible(item) }** · {item['evento']}")
+    else:
+        st.caption("Aún no hay registros de hoy.")
+
+    # Botón para ver el historial completo (incluyendo otros días si los hubiera) solo cuando lo pidas
+    texto_btn_hist = (
+        "🙈 Ocultar historial de registros"
+        if st.session_state.mostrar_historial_completo
+        else "📜 Ver historial de registros"
+    )
+    if st.button(texto_btn_hist, key="btn_toggle_historial"):
+        st.session_state.mostrar_historial_completo = not st.session_state.mostrar_historial_completo
+        st.rerun()
+
+    if st.session_state.mostrar_historial_completo:
+        st.markdown("#### 📜 Historial de registros")
+        if not st.session_state.eventos_sueno:
+            st.caption("No hay registros guardados todavía.")
+        else:
+            if eventos_hoy:
+                st.markdown("**Hoy:**")
+                for item in reversed(eventos_hoy):
+                    st.write(f"- {item['fecha']} · **{_hora_legible(item)}** · {item['evento']}")
+            if eventos_otros_dias:
+                st.markdown("**Días anteriores:**")
+                for item in reversed(eventos_otros_dias):
+                    st.write(f"- {item['fecha']} · **{_hora_legible(item)}** · {item['evento']}")
+            else:
+                st.caption("No hay registros de otros días guardados en esta sesión.")
 
     st.divider()
 
