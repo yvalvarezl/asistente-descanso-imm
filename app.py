@@ -92,7 +92,7 @@ if "sonido_activo" not in st.session_state:
 if "nombre_bebe" not in st.session_state:
     st.session_state.nombre_bebe = "Mi bebé"
 if "edad_meses" not in st.session_state:
-    st.session_state.edad_meses = 4
+    st.session_state.edad_meses = 10
 if "nombre_mama" not in st.session_state:
     st.session_state.nombre_mama = "Mamá"
 if "edad_mama" not in st.session_state:
@@ -328,87 +328,151 @@ def registrar_evento_sueno(tipo_evento: str):
         {
             "fecha": ahora.strftime("%Y-%m-%d"),
             "hora": ahora.strftime("%H:%M"),
+            "ts": ahora.isoformat(),
             "evento": tipo_evento,
         }
     )
 
 
-def resumen_y_diagnostico_despertares(
+def _parsear_ts(evento: dict) -> datetime | None:
+    if "ts" in evento:
+        try:
+            return datetime.fromisoformat(evento["ts"])
+        except ValueError:
+            pass
+    try:
+        hoy = datetime.now().strftime("%Y-%m-%d")
+        fecha_str = evento.get("fecha", hoy)
+        hora_str = evento.get("hora", "00:00")
+        return datetime.strptime(f"{fecha_str} {hora_str}", "%Y-%m-%d %H:%M")
+    except ValueError:
+        return None
+
+
+def analizar_ventanas_y_sueno(
     nombre_bebe: str, edad_meses: int, eventos: list[dict]
-) -> tuple[str, str, str]:
-    """Genera resumen, diagnóstico orientativo según edad y levantadas, y recomendación."""
+) -> dict:
+    """Evalúa ventanas de sueño, intervalos entre despertares y ráfagas cortas según edad."""
     bebe = nombre_bebe.strip() if nombre_bebe.strip() and nombre_bebe != "Mi bebé" else "tu bebé"
     mama = _etiqueta_mama()
-    levantadas = sum(1 for e in eventos if e["evento"] == "Despertó")
-    dormidas = sum(1 for e in eventos if e["evento"] == "Bebé dormido")
-    rutinas = sum(1 for e in eventos if e["evento"] == "Inicio de rutina de sueño")
 
     if edad_meses <= 3:
-        ventana = "ventanas cortas de unos 45 a 90 minutos y despertares frecuentes por alimentación o ciclos cortos"
-        umbral_alto = 5
+        ventana_vigilia_ref = "45 a 90 min"
+        rafaga_corta_min = 35
     elif edad_meses <= 6:
-        ventana = "ventanas moderadas de 1.5 a 2.5 horas con consolidación gradual"
-        umbral_alto = 4
+        ventana_vigilia_ref = "1.5 a 2.5 h (90–150 min)"
+        rafaga_corta_min = 40
     elif edad_meses <= 12:
-        ventana = "ventanas amplias de 2.5 a 3.5 horas y siestas más estructuradas"
-        umbral_alto = 3
+        ventana_vigilia_ref = "2.5 a 3.5 h (150–210 min)"
+        rafaga_corta_min = 45
     else:
-        ventana = "transición hacia 1 o 2 siestas y rutinas estables"
-        umbral_alto = 2
+        ventana_vigilia_ref = "3 a 4.5 h (180–270 min)"
+        rafaga_corta_min = 45
 
-    if len(eventos) == 0:
-        resumen = f"Hoy aún no has registrado levantadas ni dormidas para {bebe} de {edad_meses} meses."
-        diagnostico = (
-            f"Sin registros todavía para evaluar el patrón de hoy. Referencia orientativa: {ventana}."
-        )
-        recomendacion = (
-            f"Cuando inicie la próxima dormida de {bebe}, usa 'Comenzar rutina' y observa señales "
-            f"tempranas de sueño antes de que llegue al cansancio excesivo; recuerda también cuidar a {mama}."
-        )
-        return resumen, diagnostico, recomendacion
+    eventos_con_dt = []
+    for ev in eventos:
+        dt = _parsear_ts(ev)
+        if dt is not None:
+            eventos_con_dt.append((dt, ev["evento"]))
+    eventos_con_dt.sort(key=lambda x: x[0])
 
-    resumen = (
-        f"Resumen de hoy para {bebe} de {edad_meses} meses: se han registrado {levantadas} levantadas, "
-        f"{dormidas} momentos dormido y {rutinas} inicios de rutina."
+    despertares_dt = [dt for dt, tipo in eventos_con_dt if tipo == "Despertó"]
+    dormidas_dt = [dt for dt, tipo in eventos_con_dt if tipo == "Bebé dormido"]
+
+    # Intervalos entre despertares consecutivos (en minutos)
+    intervalos_despertares = []
+    for i in range(1, len(despertares_dt)):
+        diff_min = (despertares_dt[i] - despertares_dt[i - 1]).total_seconds() / 60.0
+        intervalos_despertares.append(diff_min)
+
+    rafagas_cortas = [m for m in intervalos_despertares if m <= rafaga_corta_min]
+    menor_intervalo = min(intervalos_despertares) if intervalos_despertares else None
+
+    # Tiempo transcurrido desde el último evento registrado hasta ahora
+    ultimo_dt, ultimo_tipo = eventos_con_dt[-1] if eventos_con_dt else (None, None)
+    mins_desde_ultimo = (
+        (datetime.now() - ultimo_dt).total_seconds() / 60.0 if ultimo_dt else None
     )
 
-    if levantadas == 0 and dormidas > 0:
-        diagnostico = (
-            f"Patrón tranquilo hasta ahora: {bebe} ha dormido sin levantadas registradas hoy "
-            f"(referencia para {edad_meses} meses: {ventana})."
+    if not eventos_con_dt:
+        return {
+            "ventana_ref": ventana_vigilia_ref,
+            "menor_intervalo_texto": "Sin datos aún",
+            "estado_ventana": "⏳ Sin registros de ventana hoy",
+            "resumen": f"Aún no hay eventos registrados hoy para {bebe} ({edad_meses} meses).",
+            "diagnostico": (
+                f"Para {edad_meses} meses, la referencia orientativa de ventana de vigilia es {ventana_vigilia_ref}. "
+                "Más que sumar levantadas aisladas, conviene observar cuánto tiempo pasa entre despertares o dormidas."
+            ),
+            "recomendacion": (
+                f"Registra cuándo inicia la rutina, cuándo se duerme {bebe} y cuándo despierta para identificar "
+                f"si las ventanas se acortan o si hay despertares seguidos."
+            ),
+        }
+
+    menor_intervalo_texto = (
+        f"{int(round(menor_intervalo))} min" if menor_intervalo is not None else "1 sola levantada"
+    )
+
+    # Ventana actual en curso (si el último evento fue "Despertó", está en ventana de vigilia)
+    estado_ventana_actual = ""
+    if ultimo_tipo == "Despertó" and mins_desde_ultimo is not None:
+        estado_ventana_actual = (
+            f" Lleva despierto/a aprox. {int(round(mins_desde_ultimo))} min en su ventana actual "
+            f"(referencia para {edad_meses} meses: {ventana_vigilia_ref})."
         )
-        recomendacion = (
-            f"Mantén el entorno calmo y constante; aprovecha este respiro para que {mama} hidrate y descanse."
-        )
-    elif levantadas <= max(1, umbral_alto - 2):
-        diagnostico = (
-            f"Frecuencia moderada con {levantadas} levantadas, acorde con una etapa en la que se esperan "
-            f"ajustes naturales ({ventana})."
-        )
-        recomendacion = (
-            f"Para la próxima dormida de {bebe}, procura un cierre de rutina similar y un ambiente "
-            "tranquilo con ruido blanco suave si suele ayudarle a enlazar ciclos."
-        )
-    elif levantadas < umbral_alto:
-        diagnostico = (
-            f"Se observan {levantadas} levantadas, un nivel algo activo para {edad_meses} meses "
-            f"si se compara con {ventana}."
-        )
-        recomendacion = (
-            "Revisa si la última ventana de vigilia antes de dormir fue demasiado larga o si hubo "
-            "sobreestimulación antes de acostarse; procura bajar estímulos con anticipación."
-        )
-    else:
-        diagnostico = (
-            f"Alerta de sueño fragmentado: {levantadas} levantadas registradas hoy, lo cual es "
-            f"frecuente o exigente para {edad_meses} meses con {ventana}."
-        )
-        recomendacion = (
-            f"Prioriza una rutina breve y predecible en cada dormida, cuida la temperatura y luz del "
-            f"espacio y procura que {mama} tenga una pausa breve de agua o descanso."
+    elif ultimo_tipo == "Bebé dormido" and mins_desde_ultimo is not None:
+        estado_ventana_actual = (
+            f" Lleva dormido/a aprox. {int(round(mins_desde_ultimo))} min desde el último registro de sueño."
         )
 
-    return resumen, diagnostico, recomendacion
+    resumen = (
+        f"Hoy para {bebe} ({edad_meses} meses) se registran {len(despertares_dt)} levantadas y "
+        f"{len(dormidas_dt)} momentos dormido.{estado_ventana_actual}"
+    )
+
+    # Evaluar primero si hay despertares muy seguidos (ej. 2 veces en 30 min)
+    if rafagas_cortas:
+        estado_ventana = f"⚠️ Alerta de ventana corta ({menor_intervalo_texto})"
+        diagnostico = (
+            f"Se detectaron {len(rafagas_cortas)} intervalo(s) muy corto(s) entre levantadas "
+            f"(mínimo de {int(round(menor_intervalo))} min, umbral de alerta ≤ {rafaga_corta_min} min para {edad_meses} meses). "
+            f"Que {bebe} se despierte un par de veces en media hora o menos no es ideal en esta etapa "
+            f"(ventana de vigilia de referencia: {ventana_vigilia_ref}) y suele apuntar a sueño fragmentado o ciclo incompleto."
+        )
+        recomendacion = (
+            f"Revisa si {bebe} llegó pasado de cansancio a la última dormida, si el ambiente está oscuro/tranquilo "
+            f"o si el sonido/rutina se cortó pronto; {mama}, haz una pausa breve y observa si el patrón se repite."
+        )
+    elif len(despertares_dt) >= 2 and menor_intervalo is not None and menor_intervalo < 75:
+        estado_ventana = f"🟡 Intervalos cortos ({menor_intervalo_texto})"
+        diagnostico = (
+            f"El intervalo más corto entre levantadas ha sido de {int(round(menor_intervalo))} min "
+            f"(referencia de ventana de vigilia para {edad_meses} meses: {ventana_vigilia_ref}). "
+            "Conviene vigilar si las siestas o descansos nocturnos se están entrecortando."
+        )
+        recomendacion = (
+            f"Observa las señales de sueño de {bebe} antes de que supere su ventana habitual y mantén "
+            "una transición tranquila hacia el descanso."
+        )
+    else:
+        estado_ventana = f"✅ Ventanas estables ({menor_intervalo_texto})"
+        diagnostico = (
+            f"No se observan despertares repetidos en intervalos muy cortos hoy "
+            f"(referencia de ventana de vigilia para {edad_meses} meses: {ventana_vigilia_ref})."
+        )
+        recomendacion = (
+            f"Mantén la consistencia en las rutinas de {bebe} y aprovecha las pausas para que {mama} hidrate y descanse."
+        )
+
+    return {
+        "ventana_ref": ventana_vigilia_ref,
+        "menor_intervalo_texto": menor_intervalo_texto,
+        "estado_ventana": estado_ventana,
+        "resumen": resumen,
+        "diagnostico": diagnostico,
+        "recomendacion": recomendacion,
+    }
 
 
 def evaluar_hidratacion_y_autocuidado(vasos: int, nombre_mama: str) -> tuple[str, str, str]:
@@ -423,9 +487,9 @@ def evaluar_hidratacion_y_autocuidado(vasos: int, nombre_mama: str) -> tuple[str
             "Tener una botella cerca ayuda mucho cuando estás pendiente del bebé."
         )
         recomendaciones = (
-            f"• Toma 1 vaso de agua ahora mismo mientras revisas el resumen.\n"
-            f"• Deja un vaso o termo visible donde sueles sentarte con tu bebé.\n"
-            f"• Acompaña tu hidratación con un snack sencillo y una respiración pausada."
+            "• Toma 1 vaso de agua ahora mismo mientras revisas el resumen.\n"
+            "• Deja un vaso o termo visible donde sueles sentarte con tu bebé.\n"
+            "• Acompaña tu hidratación con un snack sencillo y una respiración pausada."
         )
     elif vasos < 4:
         estado = f"🟡 Hidratación baja por ahora ({vasos}/{meta_diaria} vasos)."
@@ -435,8 +499,8 @@ def evaluar_hidratacion_y_autocuidado(vasos: int, nombre_mama: str) -> tuple[str
         )
         recomendaciones = (
             f"• Proponte completar al menos {4 - vasos} vasos más antes de la tarde/noche.\n"
-            f"• Toma agua justo después de cada despertar o cambio de rutina.\n"
-            f"• Si sientes cansancio acumulado, estira hombros y cuello por 1 minuto."
+            "• Toma agua justo después de cada despertar o cambio de rutina.\n"
+            "• Si sientes cansancio acumulado, estira hombros y cuello por 1 minuto."
         )
     elif vasos < meta_diaria:
         estado = f"💧 Hidratación en buen camino ({vasos}/{meta_diaria} vasos)."
@@ -446,8 +510,8 @@ def evaluar_hidratacion_y_autocuidado(vasos: int, nombre_mama: str) -> tuple[str
         )
         recomendaciones = (
             f"• Sigue así: vas por buen ritmo con {vasos} vasos.\n"
-            f"• Aprovecha los momentos de calma del bebé para beber un vaso más.\n"
-            f"• Recuerda comer algo nutritivo y darte un pequeño respiro mental."
+            "• Aprovecha los momentos de calma del bebé para beber un vaso más.\n"
+            "• Recuerda comer algo nutritivo y darte un pequeño respiro mental."
         )
     else:
         estado = f"✅ ¡Excelente hidratación hoy! ({vasos}/{meta_diaria}+ vasos)."
@@ -456,9 +520,9 @@ def evaluar_hidratacion_y_autocuidado(vasos: int, nombre_mama: str) -> tuple[str
             "Cuidarte también es sostener a tu bebé."
         )
         recomendaciones = (
-            f"• Mantén este hábito constante durante el resto del día.\n"
-            f"• Prioriza el descanso cuando el bebé duerma si tienes pendientes no urgentes.\n"
-            f"• Pide apoyo si necesitas una pausa real para comer o descansar."
+            "• Mantén este hábito constante durante el resto del día.\n"
+            "• Prioriza el descanso cuando el bebé duerma si tienes pendientes no urgentes.\n"
+            "• Pide apoyo si necesitas una pausa real para comer o descansar."
         )
 
     return estado, mensaje, recomendaciones
@@ -488,7 +552,7 @@ def activar_estado_cunna(estado_mqtt: str, etiqueta_evento: str | None = None):
         st.session_state.sonido_activo = None
         mensaje = (
             f"Se registró que {bebe} se levantó. Respira profundo, {mama}; aquí tienes el registro "
-            "y el resumen listos."
+            "y el resumen de ventanas listos."
         )
     elif estado_mqtt == "AGUA":
         st.session_state.vasos_agua += 1
@@ -526,7 +590,7 @@ def renderizar_estado_mqtt():
 
 
 # ---------------------------------------------------------
-# Ambiente 1: Rutina de Sueño y Sonidos (sin cambios)
+# Ambiente 1: Rutina de Sueño y Sonidos
 # ---------------------------------------------------------
 def pagina_rutina_y_sonidos():
     bebe = _etiqueta_bebe()
@@ -603,31 +667,29 @@ def pagina_monitor_y_mama():
     )
     st.markdown(
         f"<div class='subexplicacion-rutina'>{mama}, lo estás haciendo muy bien 💛 · "
-        f"A continuación verás el resumen del sueño de {bebe} ({st.session_state.edad_meses} meses) "
+        f"A continuación verás el análisis de ventanas y sueño de {bebe} ({st.session_state.edad_meses} meses) "
         "y un espacio pensado para tu hidratación y cuidado.</div>",
         unsafe_allow_html=True,
     )
 
-    # 1. Resumen y diagnóstico del bebé
-    total_levantadas = sum(
-        1 for e in st.session_state.eventos_sueno if e["evento"] == "Despertó"
-    )
-    m1, m2 = st.columns(2)
-    m1.metric("Bebé y edad", f"{bebe.capitalize()} · {st.session_state.edad_meses} meses")
-    m2.metric("Levantadas hoy", total_levantadas)
-
-    resumen, diagnostico, recomendacion = resumen_y_diagnostico_despertares(
+    analisis = analizar_ventanas_y_sueno(
         st.session_state.nombre_bebe,
         st.session_state.edad_meses,
         st.session_state.eventos_sueno,
     )
-    st.subheader(f"📋 Resumen del Sueño de {bebe.capitalize()}")
-    st.write(f"**Resumen:** {resumen}")
-    st.info(f"**Diagnóstico según levantadas y edad:** {diagnostico}")
-    st.write(f"**Recomendación para la próxima dormida:** {recomendacion}")
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Ventana ref. edad", analisis["ventana_ref"])
+    m2.metric("Menor intervalo", analisis["menor_intervalo_texto"])
+    m3.metric("Estado de ventana", analisis["estado_ventana"])
+
+    st.subheader(f"📋 Ventanas y Resumen del Sueño de {bebe.capitalize()}")
+    st.write(f"**Resumen:** {analisis['resumen']}")
+    st.info(f"**Diagnóstico según ventanas e intervalos:** {analisis['diagnostico']}")
+    st.write(f"**Recomendación para la próxima dormida:** {analisis['recomendacion']}")
     st.caption(
-        "Nota: este resumen y diagnóstico son de apoyo organizativo y referencia general según edad; "
-        "no constituyen diagnóstico médico ni reemplazan la orientación pediátrica."
+        "Nota: este análisis de ventanas e intervalos es orientativo y organizativo; "
+        "no constituye diagnóstico médico ni reemplaza la orientación pediátrica."
     )
 
     if st.session_state.eventos_sueno:
@@ -637,7 +699,7 @@ def pagina_monitor_y_mama():
 
     st.divider()
 
-    # 2. Registro de vasos de agua de mamá + diagnóstico de hidratación y recomendaciones a la par
+    # Registro de vasos de agua de mamá + diagnóstico de hidratación y recomendaciones a la par
     st.subheader(f"💧 Hidratación y Cuidado de {mama}")
     col_agua_reg, col_agua_eval = st.columns([1, 1.5], gap="large")
 
