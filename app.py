@@ -55,6 +55,14 @@ st.markdown(
         padding: 0.9rem 1.1rem;
         margin-bottom: 0.75rem;
     }
+    .transcripcion-box {
+        background-color: rgba(99, 102, 241, 0.10);
+        border: 1px solid rgba(99, 102, 241, 0.35);
+        border-radius: 12px;
+        padding: 0.75rem 1rem;
+        margin-top: 0.5rem;
+        margin-bottom: 0.75rem;
+    }
     .bocina-label {
         font-size: 1.4rem;
         text-align: center;
@@ -103,6 +111,10 @@ if "vasos_agua" not in st.session_state:
     st.session_state.vasos_agua = 0
 if "mostrar_historial_completo" not in st.session_state:
     st.session_state.mostrar_historial_completo = False
+if "ultima_transcripcion_voz" not in st.session_state:
+    st.session_state.ultima_transcripcion_voz = None
+if "estado_transcripcion_voz" not in st.session_state:
+    st.session_state.estado_transcripcion_voz = None
 if "ultimo_mensaje" not in st.session_state:
     st.session_state.ultimo_mensaje = (
         "Bienvenida a CUNNA. Un espacio suave para acompañar el sueño y tu descanso."
@@ -185,8 +197,39 @@ def texto_acompanando_bebe() -> str:
 
 
 # ---------------------------------------------------------
-# Funciones de audio (voz bajo demanda + sonido en loop)
+# Funciones de audio (voz a texto + voz bajo demanda + loop)
 # ---------------------------------------------------------
+def transcribir_nota_voz(audio_file) -> tuple[str | None, str]:
+    """Convierte el audio grabado por el usuario en texto usando SpeechRecognition."""
+    if audio_file is None:
+        return None, "No se grabó ningún audio."
+
+    try:
+        import speech_recognition as sr
+    except ImportError:
+        return (
+            None,
+            "Falta instalar `SpeechRecognition` en el entorno para transcribir la nota de voz.",
+        )
+
+    audio_bytes = audio_file.getvalue()
+    if not audio_bytes:
+        return None, "El archivo de audio está vacío."
+
+    recognizer = sr.Recognizer()
+    try:
+        with sr.AudioFile(BytesIO(audio_bytes)) as source:
+            audio_data = recognizer.record(source)
+        texto = recognizer.recognize_google(audio_data, language="es-CO")
+        return texto.strip(), "Transcripción completada."
+    except sr.UnknownValueError:
+        return None, "No se pudo entender lo que dijiste en la nota de voz. Intenta hablar más claro o cerca del micrófono."
+    except sr.RequestError as exc:
+        return None, f"No se pudo conectar con el servicio de reconocimiento de voz: {exc}"
+    except Exception as exc:
+        return None, f"Error al procesar el audio grabado: {exc}"
+
+
 @st.cache_data(show_spinner=False)
 def generar_voz_gtts(texto: str) -> bytes | None:
     try:
@@ -274,6 +317,18 @@ def mostrar_mensaje_con_bocina(mensaje: str):
             st.audio(audio_voz, format="audio/mp3", autoplay=False)
 
 
+def renderizar_transcripcion_voz():
+    """Muestra abajo lo que el usuario dijo en su última nota de voz enviada."""
+    if st.session_state.ultima_transcripcion_voz:
+        st.markdown(
+            f"<div class='transcripcion-box'>🗣️ <strong>Lo que dijiste:</strong> "
+            f"“{st.session_state.ultima_transcripcion_voz}”</div>",
+            unsafe_allow_html=True,
+        )
+    elif st.session_state.estado_transcripcion_voz:
+        st.warning(st.session_state.estado_transcripcion_voz)
+
+
 def renderizar_reproductor_continuo():
     """Muestra el audio automático en loop según el estado actual de rutina/sueño."""
     if st.session_state.sonido_activo == "estrellita":
@@ -315,7 +370,7 @@ def renderizar_reproductor_continuo():
 
 def interpretar_intencion_sueno(texto: str) -> str:
     t = texto.lower()
-    if any(k in t for k in ["despert", "llor", "arriba", "alerta"]):
+    if any(k in t for k in ["despert", "llor", "arriba", "alerta", "levant"]):
         return "DESPIERTO"
     if any(k in t for k in ["dormid", "durmio", "durmió", "se durmió", "ruido blanco"]):
         return "DORMIDO"
@@ -623,7 +678,7 @@ def pagina_rutina_y_sonidos():
         enviar_nota = st.button("Enviar nota", type="primary", use_container_width=True)
 
     if audio_entrada is not None:
-        st.caption("Audio recibido. Pulsa 'Enviar nota' para sincronizar.")
+        st.caption("Audio listo. Pulsa 'Enviar nota' para transcribirlo y sincronizar.")
 
     if btn_rutina:
         activar_estado_cunna("RUTINA", "Inicio de rutina de sueño")
@@ -632,17 +687,32 @@ def pagina_rutina_y_sonidos():
     elif btn_desperto:
         activar_estado_cunna("DESPIERTO", "Despertó")
     elif enviar_nota:
-        intencion = interpretar_intencion_sueno(texto_comando)
-        etiqueta_map = {
-            "RUTINA": "Inicio de rutina de sueño",
-            "DORMIDO": "Bebé dormido",
-            "DESPIERTO": "Despertó",
-            "AGUA": None,
-        }
-        activar_estado_cunna(intencion, etiqueta_map.get(intencion))
+        texto_efectivo = texto_comando.strip()
+        if audio_entrada is not None:
+            with st.spinner("Transcribiendo tu nota de voz..."):
+                texto_voz, estado_voz = transcribir_nota_voz(audio_entrada)
+            st.session_state.ultima_transcripcion_voz = texto_voz
+            st.session_state.estado_transcripcion_voz = None if texto_voz else estado_voz
+            if texto_voz and not texto_efectivo:
+                texto_efectivo = texto_voz
+
+        if not texto_efectivo and audio_entrada is None:
+            st.session_state.estado_transcripcion_voz = (
+                "Escribe un comando o graba una nota de voz antes de pulsar 'Enviar nota'."
+            )
+        else:
+            intencion = interpretar_intencion_sueno(texto_efectivo or "rutina")
+            etiqueta_map = {
+                "RUTINA": "Inicio de rutina de sueño",
+                "DORMIDO": "Bebé dormido",
+                "DESPIERTO": "Despertó",
+                "AGUA": None,
+            }
+            activar_estado_cunna(intencion, etiqueta_map.get(intencion))
 
     st.divider()
     st.caption(f"Estado actual: {st.session_state.fase_rutina}")
+    renderizar_transcripcion_voz()
     mostrar_mensaje_con_bocina(st.session_state.ultimo_mensaje)
     renderizar_reproductor_continuo()
     renderizar_estado_mqtt()
@@ -686,7 +756,6 @@ def pagina_monitor_y_mama():
         "no constituye diagnóstico médico ni reemplaza la orientación pediátrica."
     )
 
-    # Solo registros de HOY visibles directamente en la página, con su hora bien clara
     hoy_str = datetime.now().strftime("%Y-%m-%d")
     eventos_hoy = [e for e in st.session_state.eventos_sueno if e.get("fecha") == hoy_str]
     eventos_otros_dias = [e for e in st.session_state.eventos_sueno if e.get("fecha") != hoy_str]
@@ -694,11 +763,10 @@ def pagina_monitor_y_mama():
     st.markdown("**🕒 Registros de hoy:**")
     if eventos_hoy:
         for item in reversed(eventos_hoy):
-            st.write(f"- **{ _hora_legible(item) }** · {item['evento']}")
+            st.write(f"- **{_hora_legible(item)}** · {item['evento']}")
     else:
         st.caption("Aún no hay registros de hoy.")
 
-    # Botón para ver el historial completo (incluyendo otros días si los hubiera) solo cuando lo pidas
     texto_btn_hist = (
         "🙈 Ocultar historial de registros"
         if st.session_state.mostrar_historial_completo
