@@ -352,21 +352,25 @@ def _parsear_ts(evento: dict) -> datetime | None:
 def analizar_ventanas_y_sueno(
     nombre_bebe: str, edad_meses: int, eventos: list[dict]
 ) -> dict:
-    """Evalúa ventanas de sueño, intervalos entre despertares y ráfagas cortas según edad."""
+    """Evalúa ventanas de sueño y despertares seguidos con texto simple y claro."""
     bebe = nombre_bebe.strip() if nombre_bebe.strip() and nombre_bebe != "Mi bebé" else "tu bebé"
     mama = _etiqueta_mama()
 
     if edad_meses <= 3:
-        ventana_vigilia_ref = "45 a 90 min"
+        ventana_destacada = "45–90 min"
+        ventana_texto = "ventanas cortas (entre 45 y 90 minutos)"
         rafaga_corta_min = 35
     elif edad_meses <= 6:
-        ventana_vigilia_ref = "1.5 a 2.5 h (90–150 min)"
+        ventana_destacada = "1.5–2.5 h"
+        ventana_texto = "ventanas moderadas (entre 1 hora y media y 2 horas y media)"
         rafaga_corta_min = 40
     elif edad_meses <= 12:
-        ventana_vigilia_ref = "2.5 a 3.5 h (150–210 min)"
+        ventana_destacada = "2.5–3.5 h"
+        ventana_texto = "ventanas de 2 horas y media a 3 horas y media"
         rafaga_corta_min = 45
     else:
-        ventana_vigilia_ref = "3 a 4.5 h (180–270 min)"
+        ventana_destacada = "3–4.5 h"
+        ventana_texto = "ventanas más amplias (entre 3 y 4 horas y media)"
         rafaga_corta_min = 45
 
     eventos_con_dt = []
@@ -379,16 +383,13 @@ def analizar_ventanas_y_sueno(
     despertares_dt = [dt for dt, tipo in eventos_con_dt if tipo == "Despertó"]
     dormidas_dt = [dt for dt, tipo in eventos_con_dt if tipo == "Bebé dormido"]
 
-    # Intervalos entre despertares consecutivos (en minutos)
-    intervalos_despertares = []
-    for i in range(1, len(despertares_dt)):
-        diff_min = (despertares_dt[i] - despertares_dt[i - 1]).total_seconds() / 60.0
-        intervalos_despertares.append(diff_min)
-
+    intervalos_despertares = [
+        (despertares_dt[i] - despertares_dt[i - 1]).total_seconds() / 60.0
+        for i in range(1, len(despertares_dt))
+    ]
     rafagas_cortas = [m for m in intervalos_despertares if m <= rafaga_corta_min]
     menor_intervalo = min(intervalos_despertares) if intervalos_despertares else None
 
-    # Tiempo transcurrido desde el último evento registrado hasta ahora
     ultimo_dt, ultimo_tipo = eventos_con_dt[-1] if eventos_con_dt else (None, None)
     mins_desde_ultimo = (
         (datetime.now() - ultimo_dt).total_seconds() / 60.0 if ultimo_dt else None
@@ -396,79 +397,63 @@ def analizar_ventanas_y_sueno(
 
     if not eventos_con_dt:
         return {
-            "ventana_ref": ventana_vigilia_ref,
-            "menor_intervalo_texto": "Sin datos aún",
-            "estado_ventana": "⏳ Sin registros de ventana hoy",
-            "resumen": f"Aún no hay eventos registrados hoy para {bebe} ({edad_meses} meses).",
+            "ventana_destacada": ventana_destacada,
+            "estado_corto": "Sin registros aún",
+            "resumen": f"Hoy todavía no has registrado despertares ni dormidas para {bebe}.",
             "diagnostico": (
-                f"Para {edad_meses} meses, la referencia orientativa de ventana de vigilia es {ventana_vigilia_ref}. "
-                "Más que sumar levantadas aisladas, conviene observar cuánto tiempo pasa entre despertares o dormidas."
+                f"Para {edad_meses} meses, la referencia habitual es {ventana_texto}. "
+                "Lo más importante es ver qué tan seguidos ocurren los despertares y cómo van las ventanas."
             ),
             "recomendacion": (
-                f"Registra cuándo inicia la rutina, cuándo se duerme {bebe} y cuándo despierta para identificar "
-                f"si las ventanas se acortan o si hay despertares seguidos."
+                f"Anota cuándo empieza la rutina, cuándo se duerme {bebe} y cuándo despierta para ver "
+                "si el descanso es continuo o se corta muy rápido."
             ),
         }
 
-    menor_intervalo_texto = (
-        f"{int(round(menor_intervalo))} min" if menor_intervalo is not None else "1 sola levantada"
-    )
-
-    # Ventana actual en curso (si el último evento fue "Despertó", está en ventana de vigilia)
-    estado_ventana_actual = ""
+    estado_actual = ""
     if ultimo_tipo == "Despertó" and mins_desde_ultimo is not None:
-        estado_ventana_actual = (
-            f" Lleva despierto/a aprox. {int(round(mins_desde_ultimo))} min en su ventana actual "
-            f"(referencia para {edad_meses} meses: {ventana_vigilia_ref})."
-        )
+        estado_actual = f" Ahora lleva cerca de {int(round(mins_desde_ultimo))} minutos despierto/a."
     elif ultimo_tipo == "Bebé dormido" and mins_desde_ultimo is not None:
-        estado_ventana_actual = (
-            f" Lleva dormido/a aprox. {int(round(mins_desde_ultimo))} min desde el último registro de sueño."
-        )
+        estado_actual = f" Ahora lleva cerca de {int(round(mins_desde_ultimo))} minutos dormido/a."
 
     resumen = (
-        f"Hoy para {bebe} ({edad_meses} meses) se registran {len(despertares_dt)} levantadas y "
-        f"{len(dormidas_dt)} momentos dormido.{estado_ventana_actual}"
+        f"Hoy se han registrado {len(despertares_dt)} despertares y {len(dormidas_dt)} dormidas "
+        f"para {bebe}.{estado_actual}"
     )
 
-    # Evaluar primero si hay despertares muy seguidos (ej. 2 veces en 30 min)
     if rafagas_cortas:
-        estado_ventana = f"⚠️ Alerta de ventana corta ({menor_intervalo_texto})"
+        estado_corto = "Despertares muy seguidos"
         diagnostico = (
-            f"Se detectaron {len(rafagas_cortas)} intervalo(s) muy corto(s) entre levantadas "
-            f"(mínimo de {int(round(menor_intervalo))} min, umbral de alerta ≤ {rafaga_corta_min} min para {edad_meses} meses). "
-            f"Que {bebe} se despierte un par de veces en media hora o menos no es ideal en esta etapa "
-            f"(ventana de vigilia de referencia: {ventana_vigilia_ref}) y suele apuntar a sueño fragmentado o ciclo incompleto."
+            f"Se notan despertares muy seguidos (uno de ellos a los {int(round(menor_intervalo))} minutos). "
+            f"Que {bebe} se levante dos veces en poco tiempo —como media hora— no suele ser ideal en esta etapa "
+            f"({ventana_texto}) y puede indicar que el descanso se está cortando antes de tiempo."
         )
         recomendacion = (
-            f"Revisa si {bebe} llegó pasado de cansancio a la última dormida, si el ambiente está oscuro/tranquilo "
-            f"o si el sonido/rutina se cortó pronto; {mama}, haz una pausa breve y observa si el patrón se repite."
+            f"Revisa si {bebe} llegó muy cansado a dormir, si el cuarto está tranquilo o si algún estímulo "
+            f"lo despertó pronto; {mama}, toma un respiro breve y observa si vuelve a repetirse."
         )
     elif len(despertares_dt) >= 2 and menor_intervalo is not None and menor_intervalo < 75:
-        estado_ventana = f"🟡 Intervalos cortos ({menor_intervalo_texto})"
+        estado_corto = "Intervalos cortos"
         diagnostico = (
-            f"El intervalo más corto entre levantadas ha sido de {int(round(menor_intervalo))} min "
-            f"(referencia de ventana de vigilia para {edad_meses} meses: {ventana_vigilia_ref}). "
-            "Conviene vigilar si las siestas o descansos nocturnos se están entrecortando."
+            f"Hubo un despertar en un lapso corto ({int(round(menor_intervalo))} minutos entre levantadas). "
+            f"Para {edad_meses} meses, la referencia general es {ventana_texto}."
         )
         recomendacion = (
-            f"Observa las señales de sueño de {bebe} antes de que supere su ventana habitual y mantén "
-            "una transición tranquila hacia el descanso."
+            f"Cuida que {bebe} no pase demasiado despierto antes de la próxima siesta y mantén un cierre de rutina tranquilo."
         )
     else:
-        estado_ventana = f"✅ Ventanas estables ({menor_intervalo_texto})"
+        estado_corto = "Ritmo tranquilo"
         diagnostico = (
-            f"No se observan despertares repetidos en intervalos muy cortos hoy "
-            f"(referencia de ventana de vigilia para {edad_meses} meses: {ventana_vigilia_ref})."
+            f"Por ahora no se ven despertares repetidos en intervalos muy cortos. "
+            f"Referencia general para {edad_meses} meses: {ventana_texto}."
         )
         recomendacion = (
-            f"Mantén la consistencia en las rutinas de {bebe} y aprovecha las pausas para que {mama} hidrate y descanse."
+            f"Sigue con un ritmo suave y predecible para {bebe}, y aprovecha las pausas para que {mama} tome agua y descanse."
         )
 
     return {
-        "ventana_ref": ventana_vigilia_ref,
-        "menor_intervalo_texto": menor_intervalo_texto,
-        "estado_ventana": estado_ventana,
+        "ventana_destacada": ventana_destacada,
+        "estado_corto": estado_corto,
         "resumen": resumen,
         "diagnostico": diagnostico,
         "recomendacion": recomendacion,
@@ -667,7 +652,7 @@ def pagina_monitor_y_mama():
     )
     st.markdown(
         f"<div class='subexplicacion-rutina'>{mama}, lo estás haciendo muy bien 💛 · "
-        f"A continuación verás el análisis de ventanas y sueño de {bebe} ({st.session_state.edad_meses} meses) "
+        f"A continuación verás cómo van las ventanas y el descanso de {bebe} ({st.session_state.edad_meses} meses) "
         "y un espacio pensado para tu hidratación y cuidado.</div>",
         unsafe_allow_html=True,
     )
@@ -678,22 +663,21 @@ def pagina_monitor_y_mama():
         st.session_state.eventos_sueno,
     )
 
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Ventana ref. edad", analisis["ventana_ref"])
-    m2.metric("Menor intervalo", analisis["menor_intervalo_texto"])
-    m3.metric("Estado de ventana", analisis["estado_ventana"])
+    m1, m2 = st.columns(2)
+    m1.metric("Ventana de referencia", analisis["ventana_destacada"])
+    m2.metric("Lectura de hoy", analisis["estado_corto"])
 
     st.subheader(f"📋 Ventanas y Resumen del Sueño de {bebe.capitalize()}")
     st.write(f"**Resumen:** {analisis['resumen']}")
-    st.info(f"**Diagnóstico según ventanas e intervalos:** {analisis['diagnostico']}")
-    st.write(f"**Recomendación para la próxima dormida:** {analisis['recomendacion']}")
+    st.info(f"**Qué se observa:** {analisis['diagnostico']}")
+    st.write(f"**Para la próxima dormida:** {analisis['recomendacion']}")
     st.caption(
-        "Nota: este análisis de ventanas e intervalos es orientativo y organizativo; "
+        "Nota: orientación organizativa y de referencia general según edad; "
         "no constituye diagnóstico médico ni reemplaza la orientación pediátrica."
     )
 
     if st.session_state.eventos_sueno:
-        st.caption("Últimos registros de sueño de hoy:")
+        st.caption("Últimos registros de hoy:")
         for item in reversed(st.session_state.eventos_sueno[-6:]):
             st.write(f"- **{item['hora']}** · {item['evento']}")
 
