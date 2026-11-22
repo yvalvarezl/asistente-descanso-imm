@@ -18,7 +18,7 @@ st.set_page_config(
     layout="centered",
 )
 
-RUTA_ESTRELLITA = Path(__file__).parent / "assets" / "estrellita_piano.mp3"
+RUTA_ESTRELLITA_MP3 = Path(__file__).parent / "assetsestrellita_piano.mp3"
 
 # ---------------------------------------------------------
 # Estilos suaves para bocina compacta y baja carga cognitiva
