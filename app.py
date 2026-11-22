@@ -90,8 +90,6 @@ if "nombre_mama" not in st.session_state:
     st.session_state.nombre_mama = "Mamá"
 if "edad_mama" not in st.session_state:
     st.session_state.edad_mama = 30
-if "meta_mama" not in st.session_state:
-    st.session_state.meta_mama = "Hidratación y pausas de descanso"
 if "eventos_sueno" not in st.session_state:
     st.session_state.eventos_sueno = []
 if "vasos_agua" not in st.session_state:
@@ -149,17 +147,6 @@ with st.sidebar:
         max_value=60,
         value=st.session_state.edad_mama,
         key="slider_sidebar_edad_mama",
-    )
-
-    meta_mama_input = st.text_input(
-        "Enfoque de cuidado hoy",
-        value=st.session_state.meta_mama,
-        placeholder="Ej.: Tomar 8 vasos de agua, dormir siestas...",
-    )
-    st.session_state.meta_mama = (
-        meta_mama_input.strip()
-        if meta_mama_input.strip()
-        else "Hidratación y pausas de descanso"
     )
 
     st.divider()
@@ -322,9 +309,11 @@ def interpretar_intencion_sueno(texto: str) -> str:
 
 
 def registrar_evento_sueno(tipo_evento: str):
+    ahora = datetime.now()
     st.session_state.eventos_sueno.append(
         {
-            "hora": datetime.now().strftime("%H:%M"),
+            "fecha": ahora.strftime("%Y-%m-%d"),
+            "hora": ahora.strftime("%H:%M"),
             "evento": tipo_evento,
         }
     )
@@ -549,8 +538,7 @@ def pagina_monitor_y_mama():
     )
 
     st.caption(
-        f"**Perfil de mamá:** {st.session_state.nombre_mama} · {st.session_state.edad_mama} años · "
-        f"*Enfoque:* {st.session_state.meta_mama}"
+        f"**Perfil de mamá:** {st.session_state.nombre_mama} · {st.session_state.edad_mama} años"
     )
 
     c1, c2 = st.columns(2, gap="medium")
