@@ -15,7 +15,7 @@ from mqtt_bridge import (
 st.set_page_config(
     page_title="CUNNA · Rutina de Sueño y Cuidado",
     page_icon="🌙",
-    layout="centered",
+    layout="wide",
 )
 
 CARPETA_BASE = Path(__file__).parent
@@ -23,22 +23,39 @@ RUTA_ESTRELLITA_RAIZ = CARPETA_BASE / "assetsestrellita_piano.mp3"
 RUTA_ESTRELLITA_ASSETS = CARPETA_BASE / "assets" / "estrellita_piano.mp3"
 
 # ---------------------------------------------------------
-# Estilos suaves para bocina compacta y baja carga cognitiva
+# Estilos suaves, botones grandes y baja carga cognitiva
 # ---------------------------------------------------------
 st.markdown(
     """
     <style>
     .mensaje-box {
         background-color: rgba(255, 255, 255, 0.04);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 12px;
-        padding: 0.85rem 1rem;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 14px;
+        padding: 0.9rem 1.1rem;
         margin-bottom: 0.75rem;
     }
     .bocina-label {
-        font-size: 1.25rem;
+        font-size: 1.4rem;
         text-align: center;
-        padding-top: 0.4rem;
+        padding-top: 0.3rem;
+    }
+    /* Botones principales más grandes con emojis destacados */
+    div[data-testid="stButton"] > button[kind="secondary"],
+    div[data-testid="stButton"] > button[kind="primary"] {
+        min-height: 4.4rem;
+        font-size: 1.15rem;
+        font-weight: 600;
+        border-radius: 14px;
+        padding: 0.75rem 1rem;
+    }
+    .emoji-gigante-barra {
+        display: flex;
+        justify-content: space-around;
+        font-size: 2.35rem;
+        line-height: 1.1;
+        margin-bottom: 0.25rem;
+        user-select: none;
     }
     </style>
     """,
@@ -52,6 +69,8 @@ if "fase_rutina" not in st.session_state:
     st.session_state.fase_rutina = "EN_CALMA"
 if "sonido_activo" not in st.session_state:
     st.session_state.sonido_activo = None  # "estrellita" | "ruido_blanco" | None
+if "nombre_bebe" not in st.session_state:
+    st.session_state.nombre_bebe = "Mi bebé"
 if "edad_meses" not in st.session_state:
     st.session_state.edad_meses = 4
 if "eventos_sueno" not in st.session_state:
@@ -66,6 +85,38 @@ if "ultimo_estado_wokwi" not in st.session_state:
     st.session_state.ultimo_estado_wokwi = None
 if "ultimo_detalle_mqtt" not in st.session_state:
     st.session_state.ultimo_detalle_mqtt = None
+
+
+# ---------------------------------------------------------
+# Barra lateral izquierda: Personalización del bebé
+# ---------------------------------------------------------
+with st.sidebar:
+    st.header("👶 Perfil del Bebé")
+    st.caption("Personaliza los datos para adaptar los mensajes y el resumen.")
+
+    nombre_input = st.text_input(
+        "Nombre del bebé",
+        value=st.session_state.nombre_bebe,
+        placeholder="Ej.: Sofía, Mateo...",
+    )
+    st.session_state.nombre_bebe = nombre_input.strip() if nombre_input.strip() else "Mi bebé"
+
+    st.session_state.edad_meses = st.slider(
+        "Edad del bebé (en meses)",
+        min_value=0,
+        max_value=24,
+        value=st.session_state.edad_meses,
+        key="slider_sidebar_edad",
+    )
+
+    st.divider()
+    st.markdown(f"**Bebé:** {st.session_state.nombre_bebe}")
+    st.markdown(f"**Edad:** {st.session_state.edad_meses} mes(es)")
+
+
+def _etiqueta_bebe() -> str:
+    nombre = st.session_state.nombre_bebe
+    return nombre if nombre != "Mi bebé" else "el bebé"
 
 
 # ---------------------------------------------------------
@@ -217,51 +268,89 @@ def registrar_evento_sueno(tipo_evento: str):
     )
 
 
-def orientacion_por_edad(edad_meses: int, eventos: list[dict]) -> tuple[str, str]:
-    despertares = sum(1 for e in eventos if e["evento"] == "Despertó")
+def resumen_y_diagnostico_despertares(
+    nombre_bebe: str, edad_meses: int, eventos: list[dict]
+) -> tuple[str, str, str]:
+    """Genera resumen, diagnóstico orientativo según edad y levantadas, y recomendación."""
+    bebe = nombre_bebe if nombre_bebe != "Mi bebé" else "el bebé"
+    levantadas = sum(1 for e in eventos if e["evento"] == "Despertó")
     dormidas = sum(1 for e in eventos if e["evento"] == "Bebé dormido")
+    rutinas = sum(1 for e in eventos if e["evento"] == "Inicio de rutina de sueño")
 
     if edad_meses <= 3:
-        ventana = "ventanas cortas (aprox. 45–90 min) y sueño fragmentado"
-        sugerencia = (
-            "A esta edad los ciclos de sueño son cortos y frecuentes. Prioriza señales suaves de "
-            "sueño (bostezo, mirada perdida) antes de que llegue al cansancio excesivo."
-        )
+        ventana = "ventanas cortas (aprox. 45–90 min) y despertares frecuentes por alimentación o ciclos cortos"
+        umbral_alto = 5
     elif edad_meses <= 6:
-        ventana = "ventanas moderadas (aprox. 1.5–2.5 h) y consolidación gradual de siestas"
-        sugerencia = (
-            "Mantener una rutina nocturna breve y repetible (bajar luces, canción de cuna y paso a "
-            "ruido blanco) ayuda a asociar el cierre del día con calma."
-        )
+        ventana = "ventanas moderadas (aprox. 1.5–2.5 h) con consolidación gradual"
+        umbral_alto = 4
     elif edad_meses <= 12:
-        ventana = "ventanas más amplias (aprox. 2.5–3.5 h) y siestas más estructuradas"
-        sugerencia = (
-            "Si notas despertares seguidos o resistencia a dormir, revisa si la última ventana de "
-            "vigilia fue demasiado larga o corta para su ritmo actual."
-        )
+        ventana = "ventanas amplias (aprox. 2.5–3.5 h) y siestas más estructuradas"
+        umbral_alto = 3
     else:
         ventana = "transición hacia 1–2 siestas y rutinas estables"
-        sugerencia = (
-            "Conserva un cierre tranquilo antes de acostarse y anticipa la transición unos minutos "
-            "antes para facilitar el cambio de actividad."
-        )
+        umbral_alto = 2
 
     if len(eventos) == 0:
+        resumen = (
+            f"Hoy aún no has registrado levantadas ni dormidas para {bebe} ({edad_meses} mes(es))."
+        )
         diagnostico = (
-            f"Aún no hay registros hoy para un bebé de {edad_meses} mes(es). "
-            f"Referencia orientativa: {ventana}."
+            f"Sin registros todavía para evaluar el patrón de hoy. Referencia orientativa: {ventana}."
+        )
+        recomendacion = (
+            f"Cuando inicie la próxima dormida de {bebe}, usa 'Comenzar rutina' y observa señales "
+            "tempranas de sueño antes de que llegue al cansancio excesivo."
+        )
+        return resumen, diagnostico, recomendacion
+
+    resumen = (
+        f"Resumen de hoy para {bebe} ({edad_meses} mes(es)): se han registrado {levantadas} levantada(s), "
+        f"{dormidas} momento(s) dormido y {rutinas} inicio(s) de rutina."
+    )
+
+    if levantadas == 0 and dormidas > 0:
+        diagnostico = (
+            f"Patrón tranquilo hasta ahora: {bebe} ha dormido sin levantadas registradas hoy "
+            f"(referencia para {edad_meses} mes(es): {ventana})."
+        )
+        recomendacion = (
+            "Mantén el entorno calmo y constante; si notas alguna señal sutil de hambre o incomodidad, "
+            "atiéndela a tiempo para conservar el descanso."
+        )
+    elif levantadas <= max(1, umbral_alto - 2):
+        diagnostico = (
+            f"Frecuencia moderada ({levantadas} levantada(s)) acorde con una etapa en la que se esperan "
+            f"ajustes naturales ({ventana})."
+        )
+        recomendacion = (
+            f"Para la próxima dormida de {bebe}, procura un cierre de rutina similar y un ambiente "
+            "tranquilo con ruido blanco suave si suele ayudarle a enlazar ciclos."
+        )
+    elif levantadas < umbral_alto:
+        diagnostico = (
+            f"Se observan {levantadas} levantada(s), un nivel algo activo para {edad_meses} mes(es) "
+            f"si se compara con {ventana}."
+        )
+        recomendacion = (
+            "Revisa si la última ventana de vigilia antes de dormir fue demasiado larga o si hubo "
+            "sobreestimulación antes de acostarse; procura bajar estímulos con anticipación."
         )
     else:
         diagnostico = (
-            f"Bebé de {edad_meses} mes(es) · Registros hoy: {dormidas} dormida(s) y {despertares} despertar(es). "
-            f"Referencia general: {ventana}."
+            f"Alerta de sueño fragmentado: {levantadas} levantada(s) registradas hoy, lo cual es "
+            f"frecuente o exigente para {bebe} a los {edad_meses} mes(es) ({ventana})."
+        )
+        recomendacion = (
+            "Prioriza una rutina breve y predecible en cada dormida, cuida la temperatura/luz del "
+            "espacio y busca tú también un momento breve de pausa o hidratación."
         )
 
-    return diagnostico, sugerencia
+    return resumen, diagnostico, recomendacion
 
 
 def activar_estado_cunna(estado_mqtt: str, etiqueta_evento: str | None = None):
     st.session_state.fase_rutina = estado_mqtt
+    bebe = _etiqueta_bebe()
 
     if etiqueta_evento:
         registrar_evento_sueno(etiqueta_evento)
@@ -269,20 +358,20 @@ def activar_estado_cunna(estado_mqtt: str, etiqueta_evento: str | None = None):
     if estado_mqtt == "RUTINA":
         st.session_state.sonido_activo = "estrellita"
         mensaje = (
-            "Comenzamos la rutina de sueño. Se activó la canción de cuna en bucle; "
-            "cuando el bebé se duerma puedes pasar a ruido blanco."
+            f"Comenzamos la rutina de sueño para {bebe}. Se activó la canción de cuna en bucle; "
+            f"cuando {bebe} se duerma puedes pasar a ruido blanco."
         )
     elif estado_mqtt == "DORMIDO":
         st.session_state.sonido_activo = "ruido_blanco"
         mensaje = (
-            "Bebé dormido registrado. Cambiamos automáticamente a ruido blanco en bucle "
+            f"{bebe.capitalize()} dormido registrado. Cambiamos automáticamente a ruido blanco en bucle "
             "para acompañar su descanso."
         )
     elif estado_mqtt == "DESPIERTO":
         st.session_state.sonido_activo = None
         mensaje = (
-            "Despertar registrado con cariño. Respira profundo; aquí tienes el registro listo "
-            "para acompañar el momento."
+            f"Se registró que {bebe} se levantó. Respira profundo; aquí tienes el registro "
+            "y el resumen listos."
         )
     elif estado_mqtt == "AGUA":
         st.session_state.vasos_agua += 1
@@ -323,31 +412,28 @@ def renderizar_estado_mqtt():
 # Ambiente 1: Rutina de Sueño y Sonidos
 # ---------------------------------------------------------
 def pagina_rutina_y_sonidos():
+    bebe = _etiqueta_bebe()
     st.title("🌙 CUNNA · Rutina de Sueño y Sonidos")
     st.write(
-        "Un espacio pensado para momentos con las manos ocupadas o de noche: "
+        f"Acompañando a **{st.session_state.nombre_bebe}** ({st.session_state.edad_meses} mes(es)): "
         "activa la rutina con canción de cuna en bucle, pasa a ruido blanco al dormir y escucha "
         "los mensajes solo cuando tú lo decidas."
     )
 
-    st.session_state.edad_meses = st.slider(
-        "Edad del bebé (en meses)",
-        min_value=0,
-        max_value=24,
-        value=st.session_state.edad_meses,
-    )
-
-    col_a, col_b, col_c = st.columns(3)
+    col_a, col_b, col_c = st.columns(3, gap="medium")
     with col_a:
-        btn_rutina = st.button("🎶 Comenzar rutina", use_container_width=True)
+        st.markdown("<div class='emoji-gigante-barra'>🎶</div>", unsafe_allow_html=True)
+        btn_rutina = st.button("Comenzar rutina", use_container_width=True)
     with col_b:
-        btn_dormido = st.button("💤 Bebé dormido", use_container_width=True)
+        st.markdown("<div class='emoji-gigante-barra'>💤</div>", unsafe_allow_html=True)
+        btn_dormido = st.button("Bebé dormido", use_container_width=True)
     with col_c:
-        btn_desperto = st.button("☀️ Despertó", use_container_width=True)
+        st.markdown("<div class='emoji-gigante-barra'>☀️</div>", unsafe_allow_html=True)
+        btn_desperto = st.button("Despertó", use_container_width=True)
 
     texto_comando = st.text_input(
         "O escribe qué está pasando:",
-        placeholder="Ej.: comenzar rutina de sueño, bebé dormido, despertó o tengo sed",
+        placeholder=f"Ej.: comenzar rutina de sueño, {bebe} dormido, despertó o tengo sed",
     )
     audio_entrada = st.audio_input("O graba una nota de voz:")
     if audio_entrada is not None:
@@ -384,48 +470,45 @@ def pagina_rutina_y_sonidos():
 def pagina_monitor_y_mama():
     st.title("🤱 CUNNA · Monitor de Sueño y Cuidado de Mamá")
     st.write(
-        "Revisa el registro de despertares y dormidas según la edad del bebé, "
-        "consulta sugerencias orientativas y cuida también tu hidratación."
+        f"Seguimiento para **{st.session_state.nombre_bebe}** ({st.session_state.edad_meses} mes(es)), "
+        "resumen según las veces que se ha levantado, sugerencias orientativas y cuidado de mamá."
     )
 
-    edad = st.slider(
-        "Edad del bebé (en meses)",
-        min_value=0,
-        max_value=24,
-        value=st.session_state.edad_meses,
-        key="slider_edad_amb2",
-    )
-    st.session_state.edad_meses = edad
-
-    c1, c2 = st.columns(2)
+    c1, c2 = st.columns(2, gap="medium")
     with c1:
-        if st.button("➕ Registrar despertar", use_container_width=True):
+        st.markdown("<div class='emoji-gigante-barra'>☀️</div>", unsafe_allow_html=True)
+        if st.button("Registrar levantada", use_container_width=True):
             activar_estado_cunna("DESPIERTO", "Despertó")
     with c2:
-        if st.button("💧 Registrar vaso de agua (Mamá)", use_container_width=True):
+        st.markdown("<div class='emoji-gigante-barra'>💧</div>", unsafe_allow_html=True)
+        if st.button("Registrar vaso de agua (Mamá)", use_container_width=True):
             activar_estado_cunna("AGUA", None)
 
     st.divider()
 
-    total_despertares = sum(
+    total_levantadas = sum(
         1 for e in st.session_state.eventos_sueno if e["evento"] == "Despertó"
     )
     m1, m2, m3 = st.columns(3)
-    m1.metric("Edad del bebé", f"{st.session_state.edad_meses} meses")
-    m2.metric("Despertares hoy", total_despertares)
+    m1.metric("Bebé y edad", f"{st.session_state.nombre_bebe} · {st.session_state.edad_meses} m")
+    m2.metric("Levantadas hoy", total_levantadas)
     m3.metric("Vasos de agua (Mamá)", st.session_state.vasos_agua)
 
     mostrar_mensaje_con_bocina(st.session_state.ultimo_mensaje)
     renderizar_reproductor_continuo()
 
-    diagnostico, sugerencia = orientacion_por_edad(
-        st.session_state.edad_meses, st.session_state.eventos_sueno
+    resumen, diagnostico, recomendacion = resumen_y_diagnostico_despertares(
+        st.session_state.nombre_bebe,
+        st.session_state.edad_meses,
+        st.session_state.eventos_sueno,
     )
-    st.info(f"**Lectura orientativa:** {diagnostico}")
-    st.write(f"**Sugerencia para la próxima dormida:** {sugerencia}")
+    st.subheader("📋 Resumen y Diagnóstico Orientativo")
+    st.write(f"**Resumen:** {resumen}")
+    st.info(f"**Diagnóstico según levantadas y edad:** {diagnostico}")
+    st.write(f"**Recomendación para la próxima dormida:** {recomendacion}")
     st.caption(
-        "Nota: esta información es de apoyo organizativo y referencia general según edad; "
-        "no reemplaza la orientación de un profesional de la salud."
+        "Nota: este resumen y diagnóstico son de apoyo organizativo y referencia general según edad; "
+        "no constituyen diagnóstico médico ni reemplazan la orientación pediátrica."
     )
 
     if st.session_state.eventos_sueno:
