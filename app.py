@@ -86,6 +86,12 @@ if "nombre_bebe" not in st.session_state:
     st.session_state.nombre_bebe = "Mi bebé"
 if "edad_meses" not in st.session_state:
     st.session_state.edad_meses = 4
+if "nombre_mama" not in st.session_state:
+    st.session_state.nombre_mama = "Mamá"
+if "edad_mama" not in st.session_state:
+    st.session_state.edad_mama = 30
+if "meta_mama" not in st.session_state:
+    st.session_state.meta_mama = "Hidratación y pausas de descanso"
 if "eventos_sueno" not in st.session_state:
     st.session_state.eventos_sueno = []
 if "vasos_agua" not in st.session_state:
@@ -101,18 +107,20 @@ if "ultimo_detalle_mqtt" not in st.session_state:
 
 
 # ---------------------------------------------------------
-# Barra lateral izquierda: Personalización del bebé
+# Barra lateral izquierda: Perfil del bebé y Perfil de mamá
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("👶 Perfil del Bebé")
     st.caption("Personaliza los datos para adaptar los mensajes y el resumen.")
 
-    nombre_input = st.text_input(
+    nombre_bebe_input = st.text_input(
         "Nombre del bebé",
         value=st.session_state.nombre_bebe,
         placeholder="Ej.: Sofía, Mateo...",
     )
-    st.session_state.nombre_bebe = nombre_input.strip() if nombre_input.strip() else "Mi bebé"
+    st.session_state.nombre_bebe = (
+        nombre_bebe_input.strip() if nombre_bebe_input.strip() else "Mi bebé"
+    )
 
     st.session_state.edad_meses = st.slider(
         "Edad del bebé en meses",
@@ -123,13 +131,50 @@ with st.sidebar:
     )
 
     st.divider()
-    st.markdown(f"**Bebé:** {st.session_state.nombre_bebe}")
-    st.markdown(f"**Edad:** {st.session_state.edad_meses} meses")
+    st.header("🤱 Perfil de Mamá")
+    st.caption("Datos de acompañamiento y autocuidado diario.")
+
+    nombre_mama_input = st.text_input(
+        "Nombre de mamá",
+        value=st.session_state.nombre_mama,
+        placeholder="Ej.: Valeria, Camila...",
+    )
+    st.session_state.nombre_mama = (
+        nombre_mama_input.strip() if nombre_mama_input.strip() else "Mamá"
+    )
+
+    st.session_state.edad_mama = st.slider(
+        "Edad de mamá (años)",
+        min_value=15,
+        max_value=60,
+        value=st.session_state.edad_mama,
+        key="slider_sidebar_edad_mama",
+    )
+
+    meta_mama_input = st.text_input(
+        "Enfoque de cuidado hoy",
+        value=st.session_state.meta_mama,
+        placeholder="Ej.: Tomar 8 vasos de agua, dormir siestas...",
+    )
+    st.session_state.meta_mama = (
+        meta_mama_input.strip()
+        if meta_mama_input.strip()
+        else "Hidratación y pausas de descanso"
+    )
+
+    st.divider()
+    st.markdown(f"**Bebé:** {st.session_state.nombre_bebe} ({st.session_state.edad_meses} meses)")
+    st.markdown(f"**Mamá:** {st.session_state.nombre_mama} ({st.session_state.edad_mama} años)")
 
 
 def _etiqueta_bebe() -> str:
     nombre = st.session_state.nombre_bebe.strip()
     return nombre if nombre and nombre != "Mi bebé" else "tu bebé"
+
+
+def _etiqueta_mama() -> str:
+    nombre = st.session_state.nombre_mama.strip()
+    return nombre if nombre and nombre != "Mamá" else "mamá"
 
 
 def texto_acompanando_bebe() -> str:
@@ -290,6 +335,7 @@ def resumen_y_diagnostico_despertares(
 ) -> tuple[str, str, str]:
     """Genera resumen, diagnóstico orientativo según edad y levantadas, y recomendación."""
     bebe = nombre_bebe.strip() if nombre_bebe.strip() and nombre_bebe != "Mi bebé" else "tu bebé"
+    mama = _etiqueta_mama()
     levantadas = sum(1 for e in eventos if e["evento"] == "Despertó")
     dormidas = sum(1 for e in eventos if e["evento"] == "Bebé dormido")
     rutinas = sum(1 for e in eventos if e["evento"] == "Inicio de rutina de sueño")
@@ -314,7 +360,7 @@ def resumen_y_diagnostico_despertares(
         )
         recomendacion = (
             f"Cuando inicie la próxima dormida de {bebe}, usa 'Comenzar rutina' y observa señales "
-            "tempranas de sueño antes de que llegue al cansancio excesivo."
+            f"tempranas de sueño antes de que llegue al cansancio excesivo; recuerda también cuidar a {mama}."
         )
         return resumen, diagnostico, recomendacion
 
@@ -326,16 +372,15 @@ def resumen_y_diagnostico_despertares(
     if levantadas == 0 and dormidas > 0:
         diagnostico = (
             f"Patrón tranquilo hasta ahora: {bebe} ha dormido sin levantadas registradas hoy "
-            f"referencia para {edad_meses} meses: {ventana}."
+            f"(referencia para {edad_meses} meses: {ventana})."
         )
         recomendacion = (
-            "Mantén el entorno calmo y constante; si notas alguna señal sutil de hambre o incomodidad, "
-            "atiéndela a tiempo para conservar el descanso."
+            f"Mantén el entorno calmo y constante; aprovecha este respiro para que {mama} hidrate y descanse."
         )
     elif levantadas <= max(1, umbral_alto - 2):
         diagnostico = (
             f"Frecuencia moderada con {levantadas} levantadas, acorde con una etapa en la que se esperan "
-            f"ajustes naturales {ventana}."
+            f"ajustes naturales ({ventana})."
         )
         recomendacion = (
             f"Para la próxima dormida de {bebe}, procura un cierre de rutina similar y un ambiente "
@@ -353,11 +398,11 @@ def resumen_y_diagnostico_despertares(
     else:
         diagnostico = (
             f"Alerta de sueño fragmentado: {levantadas} levantadas registradas hoy, lo cual es "
-            f"frecuente o exigente para {bebe} de {edad_meses} meses con {ventana}."
+            f"frecuente o exigente para {edad_meses} meses con {ventana}."
         )
         recomendacion = (
-            "Prioriza una rutina breve y predecible en cada dormida, cuida la temperatura y luz del "
-            "espacio y busca tú también un momento breve de pausa o hidratación."
+            f"Prioriza una rutina breve y predecible en cada dormida, cuida la temperatura y luz del "
+            f"espacio y procura que {mama} tenga una pausa breve de agua o descanso."
         )
 
     return resumen, diagnostico, recomendacion
@@ -366,6 +411,7 @@ def resumen_y_diagnostico_despertares(
 def activar_estado_cunna(estado_mqtt: str, etiqueta_evento: str | None = None):
     st.session_state.fase_rutina = estado_mqtt
     bebe = _etiqueta_bebe()
+    mama = _etiqueta_mama()
 
     if etiqueta_evento:
         registrar_evento_sueno(etiqueta_evento)
@@ -385,13 +431,13 @@ def activar_estado_cunna(estado_mqtt: str, etiqueta_evento: str | None = None):
     elif estado_mqtt == "DESPIERTO":
         st.session_state.sonido_activo = None
         mensaje = (
-            f"Se registró que {bebe} se levantó. Respira profundo; aquí tienes el registro "
+            f"Se registró que {bebe} se levantó. Respira profundo, {mama}; aquí tienes el registro "
             "y el resumen listos."
         )
     elif estado_mqtt == "AGUA":
         st.session_state.vasos_agua += 1
         mensaje = (
-            f"¡Qué buen cuidado! Llevas {st.session_state.vasos_agua} vasos de agua hoy. "
+            f"¡Qué buen cuidado, {mama}! Llevas {st.session_state.vasos_agua} vasos de agua hoy. "
             "Tu bienestar también importa."
         )
     else:
@@ -488,10 +534,10 @@ def pagina_rutina_y_sonidos():
 
 
 # ---------------------------------------------------------
-# Ambiente 2: Monitor de Sueño y Cuidado de Mamá
+# Ambiente 2: Resumen o diagnóstico / Cuidado mamá
 # ---------------------------------------------------------
 def pagina_monitor_y_mama():
-    st.title("🤱 CUNNA · Monitor de Sueño y Cuidado de Mamá")
+    st.title("🤱 CUNNA · Resumen o diagnóstico / Cuidado mamá")
     st.markdown(
         f"<div class='acompanando-destacado'>Seguimiento {texto_acompanando_bebe()}</div>",
         unsafe_allow_html=True,
@@ -500,6 +546,11 @@ def pagina_monitor_y_mama():
         "<div class='subexplicacion-rutina'>Resumen según las veces que se ha levantado, "
         "sugerencias orientativas y cuidado de mamá.</div>",
         unsafe_allow_html=True,
+    )
+
+    st.caption(
+        f"**Perfil de mamá:** {st.session_state.nombre_mama} · {st.session_state.edad_mama} años · "
+        f"*Enfoque:* {st.session_state.meta_mama}"
     )
 
     c1, c2 = st.columns(2, gap="medium")
@@ -552,7 +603,11 @@ def pagina_monitor_y_mama():
 
 
 pg1 = st.Page(pagina_rutina_y_sonidos, title="Rutina y Sonidos", icon="🌙")
-pg2 = st.Page(pagina_monitor_y_mama, title="Monitor y Mamá", icon="🤱")
+pg2 = st.Page(
+    pagina_monitor_y_mama,
+    title="Resumen o diagnóstico / Cuidado mamá",
+    icon="🤱",
+)
 
 nav = st.navigation([pg1, pg2])
 nav.run()
