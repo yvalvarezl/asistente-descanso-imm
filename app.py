@@ -79,7 +79,7 @@ if "vasos_agua" not in st.session_state:
     st.session_state.vasos_agua = 0
 if "ultimo_mensaje" not in st.session_state:
     st.session_state.ultimo_mensaje = (
-        "Bienvenida a CUNNA. Un espacio suave para acompañar el sueño del bebé y tu descanso."
+        "Bienvenida a CUNNA. Un espacio suave para acompañar el sueño y tu descanso."
     )
 if "ultimo_estado_wokwi" not in st.session_state:
     st.session_state.ultimo_estado_wokwi = None
@@ -102,7 +102,7 @@ with st.sidebar:
     st.session_state.nombre_bebe = nombre_input.strip() if nombre_input.strip() else "Mi bebé"
 
     st.session_state.edad_meses = st.slider(
-        "Edad del bebé (en meses)",
+        "Edad del bebé en meses",
         min_value=0,
         max_value=24,
         value=st.session_state.edad_meses,
@@ -111,12 +111,16 @@ with st.sidebar:
 
     st.divider()
     st.markdown(f"**Bebé:** {st.session_state.nombre_bebe}")
-    st.markdown(f"**Edad:** {st.session_state.edad_meses} mes(es)")
+    st.markdown(f"**Edad:** {st.session_state.edad_meses} meses")
 
 
 def _etiqueta_bebe() -> str:
-    nombre = st.session_state.nombre_bebe
-    return nombre if nombre != "Mi bebé" else "el bebé"
+    nombre = st.session_state.nombre_bebe.strip()
+    return nombre if nombre and nombre != "Mi bebé" else "tu bebé"
+
+
+def texto_acompanando_bebe() -> str:
+    return f"acompañando a {_etiqueta_bebe()} de {st.session_state.edad_meses} meses"
 
 
 # ---------------------------------------------------------
@@ -220,7 +224,7 @@ def renderizar_reproductor_continuo():
             else None
         )
         if archivo_piano is not None:
-            st.caption("⭐ Canción de cuna (Estrellita al piano) activa en bucle automático:")
+            st.caption("⭐ Canción de cuna Estrellita al piano activa en bucle automático:")
             st.audio(
                 archivo_piano.read_bytes(),
                 format="audio/mp3",
@@ -272,28 +276,26 @@ def resumen_y_diagnostico_despertares(
     nombre_bebe: str, edad_meses: int, eventos: list[dict]
 ) -> tuple[str, str, str]:
     """Genera resumen, diagnóstico orientativo según edad y levantadas, y recomendación."""
-    bebe = nombre_bebe if nombre_bebe != "Mi bebé" else "el bebé"
+    bebe = nombre_bebe.strip() if nombre_bebe.strip() and nombre_bebe != "Mi bebé" else "tu bebé"
     levantadas = sum(1 for e in eventos if e["evento"] == "Despertó")
     dormidas = sum(1 for e in eventos if e["evento"] == "Bebé dormido")
     rutinas = sum(1 for e in eventos if e["evento"] == "Inicio de rutina de sueño")
 
     if edad_meses <= 3:
-        ventana = "ventanas cortas (aprox. 45–90 min) y despertares frecuentes por alimentación o ciclos cortos"
+        ventana = "ventanas cortas de unos 45 a 90 minutos y despertares frecuentes por alimentación o ciclos cortos"
         umbral_alto = 5
     elif edad_meses <= 6:
-        ventana = "ventanas moderadas (aprox. 1.5–2.5 h) con consolidación gradual"
+        ventana = "ventanas moderadas de 1.5 a 2.5 horas con consolidación gradual"
         umbral_alto = 4
     elif edad_meses <= 12:
-        ventana = "ventanas amplias (aprox. 2.5–3.5 h) y siestas más estructuradas"
+        ventana = "ventanas amplias de 2.5 a 3.5 horas y siestas más estructuradas"
         umbral_alto = 3
     else:
-        ventana = "transición hacia 1–2 siestas y rutinas estables"
+        ventana = "transición hacia 1 o 2 siestas y rutinas estables"
         umbral_alto = 2
 
     if len(eventos) == 0:
-        resumen = (
-            f"Hoy aún no has registrado levantadas ni dormidas para {bebe} ({edad_meses} mes(es))."
-        )
+        resumen = f"Hoy aún no has registrado levantadas ni dormidas para {bebe} de {edad_meses} meses."
         diagnostico = (
             f"Sin registros todavía para evaluar el patrón de hoy. Referencia orientativa: {ventana}."
         )
@@ -304,14 +306,14 @@ def resumen_y_diagnostico_despertares(
         return resumen, diagnostico, recomendacion
 
     resumen = (
-        f"Resumen de hoy para {bebe} ({edad_meses} mes(es)): se han registrado {levantadas} levantada(s), "
-        f"{dormidas} momento(s) dormido y {rutinas} inicio(s) de rutina."
+        f"Resumen de hoy para {bebe} de {edad_meses} meses: se han registrado {levantadas} levantadas, "
+        f"{dormidas} momentos dormido y {rutinas} inicios de rutina."
     )
 
     if levantadas == 0 and dormidas > 0:
         diagnostico = (
             f"Patrón tranquilo hasta ahora: {bebe} ha dormido sin levantadas registradas hoy "
-            f"(referencia para {edad_meses} mes(es): {ventana})."
+            f"referencia para {edad_meses} meses: {ventana}."
         )
         recomendacion = (
             "Mantén el entorno calmo y constante; si notas alguna señal sutil de hambre o incomodidad, "
@@ -319,8 +321,8 @@ def resumen_y_diagnostico_despertares(
         )
     elif levantadas <= max(1, umbral_alto - 2):
         diagnostico = (
-            f"Frecuencia moderada ({levantadas} levantada(s)) acorde con una etapa en la que se esperan "
-            f"ajustes naturales ({ventana})."
+            f"Frecuencia moderada con {levantadas} levantadas, acorde con una etapa en la que se esperan "
+            f"ajustes naturales {ventana}."
         )
         recomendacion = (
             f"Para la próxima dormida de {bebe}, procura un cierre de rutina similar y un ambiente "
@@ -328,7 +330,7 @@ def resumen_y_diagnostico_despertares(
         )
     elif levantadas < umbral_alto:
         diagnostico = (
-            f"Se observan {levantadas} levantada(s), un nivel algo activo para {edad_meses} mes(es) "
+            f"Se observan {levantadas} levantadas, un nivel algo activo para {edad_meses} meses "
             f"si se compara con {ventana}."
         )
         recomendacion = (
@@ -337,11 +339,11 @@ def resumen_y_diagnostico_despertares(
         )
     else:
         diagnostico = (
-            f"Alerta de sueño fragmentado: {levantadas} levantada(s) registradas hoy, lo cual es "
-            f"frecuente o exigente para {bebe} a los {edad_meses} mes(es) ({ventana})."
+            f"Alerta de sueño fragmentado: {levantadas} levantadas registradas hoy, lo cual es "
+            f"frecuente o exigente para {bebe} de {edad_meses} meses con {ventana}."
         )
         recomendacion = (
-            "Prioriza una rutina breve y predecible en cada dormida, cuida la temperatura/luz del "
+            "Prioriza una rutina breve y predecible en cada dormida, cuida la temperatura y luz del "
             "espacio y busca tú también un momento breve de pausa o hidratación."
         )
 
@@ -376,7 +378,7 @@ def activar_estado_cunna(estado_mqtt: str, etiqueta_evento: str | None = None):
     elif estado_mqtt == "AGUA":
         st.session_state.vasos_agua += 1
         mensaje = (
-            f"¡Qué buen cuidado! Llevas {st.session_state.vasos_agua} vaso(s) de agua hoy. "
+            f"¡Qué buen cuidado! Llevas {st.session_state.vasos_agua} vasos de agua hoy. "
             "Tu bienestar también importa."
         )
     else:
@@ -400,7 +402,7 @@ def renderizar_estado_mqtt():
             st.warning(detalle_envio)
 
     if st.session_state.ultimo_estado_wokwi:
-        st.info(f"Confirmación desde Wokwi ({TOPIC_ESTADO}): {st.session_state.ultimo_estado_wokwi}")
+        st.info(f"Confirmación desde Wokwi {TOPIC_ESTADO}: {st.session_state.ultimo_estado_wokwi}")
     else:
         st.caption(
             f"Sin lectura nueva en {TOPIC_ESTADO} en este instante. "
@@ -415,7 +417,7 @@ def pagina_rutina_y_sonidos():
     bebe = _etiqueta_bebe()
     st.title("🌙 CUNNA · Rutina de Sueño y Sonidos")
     st.write(
-        f"Acompañando a **{st.session_state.nombre_bebe}** ({st.session_state.edad_meses} mes(es)): "
+        f"Acompañando a {bebe} de {st.session_state.edad_meses} meses: "
         "activa la rutina con canción de cuna en bucle, pasa a ruido blanco al dormir y escucha "
         "los mensajes solo cuando tú lo decidas."
     )
@@ -462,7 +464,7 @@ def pagina_rutina_y_sonidos():
         activar_estado_cunna(intencion, etiqueta_map.get(intencion))
 
     st.divider()
-    st.caption(f"Estado actual: `{st.session_state.fase_rutina}`")
+    st.caption(f"Estado actual: {st.session_state.fase_rutina}")
     mostrar_mensaje_con_bocina(st.session_state.ultimo_mensaje)
     renderizar_reproductor_continuo()
     renderizar_estado_mqtt()
@@ -474,7 +476,7 @@ def pagina_rutina_y_sonidos():
 def pagina_monitor_y_mama():
     st.title("🤱 CUNNA · Monitor de Sueño y Cuidado de Mamá")
     st.write(
-        f"Seguimiento para **{st.session_state.nombre_bebe}** ({st.session_state.edad_meses} mes(es)), "
+        f"Seguimiento {texto_acompanando_bebe()}: "
         "resumen según las veces que se ha levantado, sugerencias orientativas y cuidado de mamá."
     )
 
@@ -485,7 +487,7 @@ def pagina_monitor_y_mama():
             activar_estado_cunna("DESPIERTO", "Despertó")
     with c2:
         st.markdown("<div class='emoji-gigante-barra'>💧</div>", unsafe_allow_html=True)
-        if st.button("Registrar vaso de agua (Mamá)", use_container_width=True):
+        if st.button("Registrar vaso de agua Mamá", use_container_width=True):
             activar_estado_cunna("AGUA", None)
 
     st.divider()
@@ -494,9 +496,9 @@ def pagina_monitor_y_mama():
         1 for e in st.session_state.eventos_sueno if e["evento"] == "Despertó"
     )
     m1, m2, m3 = st.columns(3)
-    m1.metric("Bebé y edad", f"{st.session_state.nombre_bebe} · {st.session_state.edad_meses} m")
+    m1.metric("Bebé y edad", f"{_etiqueta_bebe().capitalize()} · {st.session_state.edad_meses} meses")
     m2.metric("Levantadas hoy", total_levantadas)
-    m3.metric("Vasos de agua (Mamá)", st.session_state.vasos_agua)
+    m3.metric("Vasos de agua Mamá", st.session_state.vasos_agua)
 
     mostrar_mensaje_con_bocina(st.session_state.ultimo_mensaje)
     renderizar_reproductor_continuo()
@@ -522,7 +524,7 @@ def pagina_monitor_y_mama():
 
     st.divider()
     st.subheader("Conexión MQTT con Wokwi")
-    st.write(f"**Comandos:** `{TOPIC_CMD}` · **Estado:** `{TOPIC_ESTADO}`")
+    st.write(f"**Comandos:** {TOPIC_CMD} · **Estado:** {TOPIC_ESTADO}")
     if st.session_state.ultimo_estado_wokwi:
         st.json(st.session_state.ultimo_estado_wokwi)
 
