@@ -435,11 +435,15 @@ def pagina_rutina_y_sonidos():
         "O escribe qué está pasando:",
         placeholder=f"Ej.: comenzar rutina de sueño, {bebe} dormido, despertó o tengo sed",
     )
-    audio_entrada = st.audio_input("O graba una nota de voz:")
+
+    col_audio, col_enviar = st.columns([3, 1], gap="small", vertical_alignment="bottom")
+    with col_audio:
+        audio_entrada = st.audio_input("O graba una nota de voz:")
+    with col_enviar:
+        enviar_nota = st.button("Enviar nota", type="primary", use_container_width=True)
+
     if audio_entrada is not None:
         st.caption("Audio recibido. Pulsa 'Enviar nota' para sincronizar.")
-
-    enviar_nota = st.button("Enviar nota", type="primary", use_container_width=True)
 
     if btn_rutina:
         activar_estado_cunna("RUTINA", "Inicio de rutina de sueño")
