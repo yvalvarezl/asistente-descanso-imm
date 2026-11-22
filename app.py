@@ -411,6 +411,59 @@ def resumen_y_diagnostico_despertares(
     return resumen, diagnostico, recomendacion
 
 
+def evaluar_hidratacion_y_autocuidado(vasos: int, nombre_mama: str) -> tuple[str, str, str]:
+    """Evalúa el estado de hidratación según vasos registrados y ofrece recomendaciones para mamá."""
+    mama = nombre_mama.strip() if nombre_mama.strip() and nombre_mama != "Mamá" else "Mamá"
+    meta_diaria = 8
+
+    if vasos == 0:
+        estado = f"⚠️ Aún no has registrado vasos de agua hoy ({vasos}/{meta_diaria})."
+        mensaje = (
+            f"{mama}, te estás hidratando mal por ahora: llevas 0 vasos registrados. "
+            "Tener una botella cerca ayuda mucho cuando estás pendiente del bebé."
+        )
+        recomendaciones = (
+            f"• Toma 1 vaso de agua ahora mismo mientras revisas el resumen.\n"
+            f"• Deja un vaso o termo visible donde sueles sentarte con tu bebé.\n"
+            f"• Acompaña tu hidratación con un snack sencillo y una respiración pausada."
+        )
+    elif vasos < 4:
+        estado = f"🟡 Hidratación baja por ahora ({vasos}/{meta_diaria} vasos)."
+        mensaje = (
+            f"{mama}, vas empezando, pero aún te estás hidratando poco ({vasos} de {meta_diaria} vasos). "
+            "Un par de sorbos más entre rutinas marcarán la diferencia."
+        )
+        recomendaciones = (
+            f"• Proponte completar al menos {4 - vasos} vasos más antes de la tarde/noche.\n"
+            f"• Toma agua justo después de cada despertar o cambio de rutina.\n"
+            f"• Si sientes cansancio acumulado, estira hombros y cuello por 1 minuto."
+        )
+    elif vasos < meta_diaria:
+        estado = f"💧 Hidratación en buen camino ({vasos}/{meta_diaria} vasos)."
+        mensaje = (
+            f"¡Muy bien, {mama}! Te estás hidratando bien: llevas {vasos} vasos registrados y estás "
+            f"a {meta_diaria - vasos} de tu meta diaria de {meta_diaria}."
+        )
+        recomendaciones = (
+            f"• Sigue así: vas por buen ritmo con {vasos} vasos.\n"
+            f"• Aprovecha los momentos de calma del bebé para beber un vaso más.\n"
+            f"• Recuerda comer algo nutritivo y darte un pequeño respiro mental."
+        )
+    else:
+        estado = f"✅ ¡Excelente hidratación hoy! ({vasos}/{meta_diaria}+ vasos)."
+        mensaje = (
+            f"¡Qué gran cuidado, {mama}! Te estás hidratando muy bien con {vasos} vasos registrados hoy. "
+            "Cuidarte también es sostener a tu bebé."
+        )
+        recomendaciones = (
+            f"• Mantén este hábito constante durante el resto del día.\n"
+            f"• Prioriza el descanso cuando el bebé duerma si tienes pendientes no urgentes.\n"
+            f"• Pide apoyo si necesitas una pausa real para comer o descansar."
+        )
+
+    return estado, mensaje, recomendaciones
+
+
 def activar_estado_cunna(estado_mqtt: str, etiqueta_evento: str | None = None):
     st.session_state.fase_rutina = estado_mqtt
     bebe = _etiqueta_bebe()
@@ -473,7 +526,7 @@ def renderizar_estado_mqtt():
 
 
 # ---------------------------------------------------------
-# Ambiente 1: Rutina de Sueño y Sonidos
+# Ambiente 1: Rutina de Sueño y Sonidos (sin cambios)
 # ---------------------------------------------------------
 def pagina_rutina_y_sonidos():
     bebe = _etiqueta_bebe()
@@ -542,6 +595,7 @@ def pagina_rutina_y_sonidos():
 def pagina_monitor_y_mama():
     bebe = _etiqueta_bebe()
     mama = _etiqueta_mama()
+
     st.title("🤱 CUNNA · Resumen o diagnóstico / Cuidado mamá")
     st.markdown(
         f"<div class='nombre-mama-destacado'>{_titulo_mama_grande()}</div>",
@@ -549,40 +603,25 @@ def pagina_monitor_y_mama():
     )
     st.markdown(
         f"<div class='subexplicacion-rutina'>{mama}, lo estás haciendo muy bien 💛 · "
-        f"A continuación verás el resumen del sueño de {bebe} ({st.session_state.edad_meses} meses), "
-        "cómo ha descansado y un espacio para cuidar de ti.</div>",
+        f"A continuación verás el resumen del sueño de {bebe} ({st.session_state.edad_meses} meses) "
+        "y un espacio pensado para tu hidratación y cuidado.</div>",
         unsafe_allow_html=True,
     )
 
-    c1, c2 = st.columns(2, gap="medium")
-    with c1:
-        st.markdown("<div class='emoji-gigante-barra'>☀️</div>", unsafe_allow_html=True)
-        if st.button("Registrar levantada", use_container_width=True):
-            activar_estado_cunna("DESPIERTO", "Despertó")
-    with c2:
-        st.markdown("<div class='emoji-gigante-barra'>💧</div>", unsafe_allow_html=True)
-        if st.button("Registrar vaso de agua Mamá", use_container_width=True):
-            activar_estado_cunna("AGUA", None)
-
-    st.divider()
-
+    # 1. Resumen y diagnóstico del bebé
     total_levantadas = sum(
         1 for e in st.session_state.eventos_sueno if e["evento"] == "Despertó"
     )
-    m1, m2, m3 = st.columns(3)
+    m1, m2 = st.columns(2)
     m1.metric("Bebé y edad", f"{bebe.capitalize()} · {st.session_state.edad_meses} meses")
     m2.metric("Levantadas hoy", total_levantadas)
-    m3.metric("Vasos de agua Mamá", st.session_state.vasos_agua)
-
-    mostrar_mensaje_con_bocina(st.session_state.ultimo_mensaje)
-    renderizar_reproductor_continuo()
 
     resumen, diagnostico, recomendacion = resumen_y_diagnostico_despertares(
         st.session_state.nombre_bebe,
         st.session_state.edad_meses,
         st.session_state.eventos_sueno,
     )
-    st.subheader(f"📋 Resumen y Diagnóstico del Sueño de {bebe.capitalize()}")
+    st.subheader(f"📋 Resumen del Sueño de {bebe.capitalize()}")
     st.write(f"**Resumen:** {resumen}")
     st.info(f"**Diagnóstico según levantadas y edad:** {diagnostico}")
     st.write(f"**Recomendación para la próxima dormida:** {recomendacion}")
@@ -592,9 +631,35 @@ def pagina_monitor_y_mama():
     )
 
     if st.session_state.eventos_sueno:
-        st.subheader("Historial de registros de hoy")
-        for item in reversed(st.session_state.eventos_sueno[-8:]):
+        st.caption("Últimos registros de sueño de hoy:")
+        for item in reversed(st.session_state.eventos_sueno[-6:]):
             st.write(f"- **{item['hora']}** · {item['evento']}")
+
+    st.divider()
+
+    # 2. Registro de vasos de agua de mamá + diagnóstico de hidratación y recomendaciones a la par
+    st.subheader(f"💧 Hidratación y Cuidado de {mama}")
+    col_agua_reg, col_agua_eval = st.columns([1, 1.5], gap="large")
+
+    with col_agua_reg:
+        st.metric("Vasos de agua hoy", f"{st.session_state.vasos_agua} 💧")
+        st.markdown("<div class='emoji-gigante-barra'>💧</div>", unsafe_allow_html=True)
+        if st.button("+1 Vaso de agua", type="primary", use_container_width=True):
+            activar_estado_cunna("AGUA", None)
+            st.rerun()
+
+    estado_hidra, msg_hidra, recs_mama = evaluar_hidratacion_y_autocuidado(
+        st.session_state.vasos_agua, st.session_state.nombre_mama
+    )
+    with col_agua_eval:
+        st.markdown(f"**Estado de hidratación:** {estado_hidra}")
+        st.write(msg_hidra)
+        st.markdown("**Recomendaciones para ti:**")
+        st.markdown(recs_mama)
+
+    st.divider()
+    mostrar_mensaje_con_bocina(st.session_state.ultimo_mensaje)
+    renderizar_reproductor_continuo()
 
     st.divider()
     st.subheader("Conexión MQTT con Wokwi")
