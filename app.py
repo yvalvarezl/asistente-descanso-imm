@@ -18,7 +18,10 @@ st.set_page_config(
     layout="centered",
 )
 
-RUTA_ESTRELLITA_MP3 = Path(__file__).parent / "assetsestrellita_piano.mp3"
+CARPETA_BASE = Path(__file__).parent
+RUTA_ESTRELLITA_RAIZ = CARPETA_BASE / "assetsestrellita_piano.mp3"
+RUTA_ESTRELLITA_ASSETS = CARPETA_BASE / "assets" / "estrellita_piano.mp3"
+
 # ---------------------------------------------------------
 # Estilos suaves para bocina compacta y baja carga cognitiva
 # ---------------------------------------------------------
@@ -158,10 +161,26 @@ def mostrar_mensaje_con_bocina(mensaje: str):
 def renderizar_reproductor_continuo():
     """Muestra el audio automático en loop según el estado actual de rutina/sueño."""
     if st.session_state.sonido_activo == "estrellita":
-        st.caption("⭐ Canción de cuna (Estrellita) activa en bucle automático:")
-        if RUTA_ESTRELLITA.exists():
-            st.audio(str(RUTA_ESTRELLITA), format="audio/mp3", autoplay=True, loop=True)
+        archivo_piano = (
+            RUTA_ESTRELLITA_RAIZ
+            if RUTA_ESTRELLITA_RAIZ.exists()
+            else RUTA_ESTRELLITA_ASSETS
+            if RUTA_ESTRELLITA_ASSETS.exists()
+            else None
+        )
+        if archivo_piano is not None:
+            st.caption("⭐ Canción de cuna (Estrellita al piano) activa en bucle automático:")
+            st.audio(
+                archivo_piano.read_bytes(),
+                format="audio/mp3",
+                autoplay=True,
+                loop=True,
+            )
         else:
+            st.warning(
+                "No se encontró `assetsestrellita_piano.mp3` ni `assets/estrellita_piano.mp3` en el repositorio; "
+                "reproduciendo melodía de respaldo."
+            )
             st.audio(
                 generar_sonido_continuo("estrellita"),
                 format="audio/wav",
