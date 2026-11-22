@@ -1,5 +1,6 @@
 from io import BytesIO
 from datetime import datetime
+from pathlib import Path
 import wave
 import numpy as np
 import streamlit as st
@@ -16,6 +17,8 @@ st.set_page_config(
     page_icon="🌙",
     layout="centered",
 )
+
+RUTA_ESTRELLITA = Path(__file__).parent / "assets" / "estrellita_piano.mp3"
 
 # ---------------------------------------------------------
 # Estilos suaves para bocina compacta y baja carga cognitiva
@@ -46,7 +49,7 @@ st.markdown(
 if "fase_rutina" not in st.session_state:
     st.session_state.fase_rutina = "EN_CALMA"
 if "sonido_activo" not in st.session_state:
-    st.session_state.sonido_activo = None  # "arrullo" | "ruido_blanco" | None
+    st.session_state.sonido_activo = None  # "estrellita" | "ruido_blanco" | None
 if "edad_meses" not in st.session_state:
     st.session_state.edad_meses = 4
 if "eventos_sueno" not in st.session_state:
@@ -78,31 +81,56 @@ def generar_voz_gtts(texto: str) -> bytes | None:
         return None
 
 
-@st.cache_data(show_spinner=False)
-def generar_sonido_continuo(tipo: str, duracion_seg: float = 12.0, sr: int = 16000) -> bytes:
-    """Genera audio WAV continuo (periodico en los bordes para que el loop se sienta fluido)."""
-    t = np.linspace(0, duracion_seg, int(sr * duracion_seg), endpoint=False)
-    frecuencia_ciclo = 1.0 / duracion_seg  # 1 ciclo exacto en duracion_seg -> loop sin corte
+def _nota_suave(freq: float, duracion: float, sr: int = 16000, amp: float = 0.09) -> np.ndarray:
+    """Genera una nota de cuna cálida con armónicos suaves y envolvente sin clics."""
+    n = max(1, int(sr * duracion))
+    t = np.linspace(0, duracion, n, endpoint=False)
+    onda = (
+        0.75 * np.sin(2 * np.pi * freq * t)
+        + 0.20 * np.sin(2 * np.pi * (2 * freq) * t)
+        + 0.05 * np.sin(2 * np.pi * (3 * freq) * t)
+    )
+    ataque = min(int(0.06 * sr), n // 3)
+    liberacion = min(int(0.10 * sr), n // 3)
+    env = np.ones(n)
+    if ataque > 0:
+        env[:ataque] = np.linspace(0.0, 1.0, ataque)
+    if liberacion > 0:
+        env[-liberacion:] = np.linspace(1.0, 0.0, liberacion)
+    return amp * onda * env
 
+
+@st.cache_data(show_spinner=False)
+def generar_sonido_continuo(tipo: str, duracion_seg: float = 16.0, sr: int = 16000) -> bytes:
+    """Genera audio WAV continuo en bucle para respaldo de canción de cuna o ruido blanco."""
     if tipo == "ruido_blanco":
+        t = np.linspace(0, duracion_seg, int(sr * duracion_seg), endpoint=False)
+        frecuencia_ciclo = 1.0 / duracion_seg
         rng = np.random.default_rng(42)
         ruido = rng.normal(0.0, 0.13, size=t.shape)
-        # Suavizado para evitar agudos bruscos
         kernel = np.ones(14) / 14.0
         onda = np.convolve(ruido, kernel, mode="same")
-        # Respiración sutil periódica en loop
         modulacion = 0.88 + 0.12 * np.sin(2 * np.pi * frecuencia_ciclo * t)
         onda = onda * modulacion
     else:
-        # Melodía de cuna suave en frecuencias armónicas exactas para loop continuo
-        f1 = round(261.63 / frecuencia_ciclo) * frecuencia_ciclo  # Do4 aprox.
-        f2 = round(329.63 / frecuencia_ciclo) * frecuencia_ciclo  # Mi4 aprox.
-        f3 = round(392.00 / frecuencia_ciclo) * frecuencia_ciclo  # Sol4 aprox.
-        arm1 = 0.075 * np.sin(2 * np.pi * f1 * t)
-        arm2 = 0.055 * np.sin(2 * np.pi * f2 * t)
-        arm3 = 0.045 * np.sin(2 * np.pi * f3 * t)
-        vaiven = 0.72 + 0.28 * np.sin(2 * np.pi * (2 * frecuencia_ciclo) * t)
-        onda = (arm1 + arm2 + arm3) * vaiven
+        notas = [
+            (261.63, 0.65),
+            (261.63, 0.65),
+            (392.00, 0.65),
+            (392.00, 0.65),
+            (440.00, 0.65),
+            (440.00, 0.65),
+            (392.00, 1.30),
+            (349.23, 0.65),
+            (349.23, 0.65),
+            (329.63, 0.65),
+            (329.63, 0.65),
+            (293.66, 0.65),
+            (293.66, 0.65),
+            (261.63, 1.45),
+        ]
+        segmentos = [_nota_suave(f, d, sr=sr, amp=0.095) for f, d in notas]
+        onda = np.concatenate(segmentos)
 
     pcm = np.clip(onda * 32767, -32768, 32767).astype(np.int16)
     buf = BytesIO()
@@ -130,14 +158,17 @@ def mostrar_mensaje_con_bocina(mensaje: str):
 
 def renderizar_reproductor_continuo():
     """Muestra el audio automático en loop según el estado actual de rutina/sueño."""
-    if st.session_state.sonido_activo == "arrullo":
-        st.caption("🎶 Música de rutina activa en bucle automático:")
-        st.audio(
-            generar_sonido_continuo("arrullo"),
-            format="audio/wav",
-            autoplay=True,
-            loop=True,
-        )
+    if st.session_state.sonido_activo == "estrellita":
+        st.caption("⭐ Canción de cuna (Estrellita) activa en bucle automático:")
+        if RUTA_ESTRELLITA.exists():
+            st.audio(str(RUTA_ESTRELLITA), format="audio/mp3", autoplay=True, loop=True)
+        else:
+            st.audio(
+                generar_sonido_continuo("estrellita"),
+                format="audio/wav",
+                autoplay=True,
+                loop=True,
+            )
     elif st.session_state.sonido_activo == "ruido_blanco":
         st.caption("🌊 Ruido blanco activo en bucle automático para el descanso:")
         st.audio(
@@ -181,7 +212,7 @@ def orientacion_por_edad(edad_meses: int, eventos: list[dict]) -> tuple[str, str
     elif edad_meses <= 6:
         ventana = "ventanas moderadas (aprox. 1.5–2.5 h) y consolidación gradual de siestas"
         sugerencia = (
-            "Mantener una rutina nocturna breve y repetible (bajar luces, música suave y paso a "
+            "Mantener una rutina nocturna breve y repetible (bajar luces, canción de cuna y paso a "
             "ruido blanco) ayuda a asociar el cierre del día con calma."
         )
     elif edad_meses <= 12:
@@ -218,9 +249,9 @@ def activar_estado_cunna(estado_mqtt: str, etiqueta_evento: str | None = None):
         registrar_evento_sueno(etiqueta_evento)
 
     if estado_mqtt == "RUTINA":
-        st.session_state.sonido_activo = "arrullo"
+        st.session_state.sonido_activo = "estrellita"
         mensaje = (
-            "Comenzamos la rutina de sueño. Se activó la música suave en bucle; "
+            "Comenzamos la rutina de sueño. Se activó la canción de cuna en bucle; "
             "cuando el bebé se duerma puedes pasar a ruido blanco."
         )
     elif estado_mqtt == "DORMIDO":
@@ -277,7 +308,7 @@ def pagina_rutina_y_sonidos():
     st.title("🌙 CUNNA · Rutina de Sueño y Sonidos")
     st.write(
         "Un espacio pensado para momentos con las manos ocupadas o de noche: "
-        "activa la rutina con música en bucle, pasa a ruido blanco al dormir y escucha "
+        "activa la rutina con canción de cuna en bucle, pasa a ruido blanco al dormir y escucha "
         "los mensajes solo cuando tú lo decidas."
     )
 
