@@ -35,6 +35,13 @@ st.markdown(
         margin-top: 0.15rem;
         margin-bottom: 0.3rem;
     }
+    .nombre-mama-destacado {
+        font-size: 1.85rem;
+        font-weight: 700;
+        line-height: 1.2;
+        margin-top: 0.2rem;
+        margin-bottom: 0.35rem;
+    }
     .subexplicacion-rutina {
         font-size: 0.98rem;
         line-height: 1.5;
@@ -161,7 +168,14 @@ def _etiqueta_bebe() -> str:
 
 def _etiqueta_mama() -> str:
     nombre = st.session_state.nombre_mama.strip()
-    return nombre if nombre and nombre != "Mamá" else "mamá"
+    return nombre if nombre and nombre != "Mamá" else "Mamá"
+
+
+def _titulo_mama_grande() -> str:
+    nombre = st.session_state.nombre_mama.strip()
+    if nombre and nombre != "Mamá":
+        return f"🤱 {nombre} · {st.session_state.edad_mama} años"
+    return f"🤱 Mamá · {st.session_state.edad_mama} años"
 
 
 def texto_acompanando_bebe() -> str:
@@ -526,19 +540,18 @@ def pagina_rutina_y_sonidos():
 # Ambiente 2: Resumen o diagnóstico / Cuidado mamá
 # ---------------------------------------------------------
 def pagina_monitor_y_mama():
+    bebe = _etiqueta_bebe()
+    mama = _etiqueta_mama()
     st.title("🤱 CUNNA · Resumen o diagnóstico / Cuidado mamá")
     st.markdown(
-        f"<div class='acompanando-destacado'>Seguimiento {texto_acompanando_bebe()}</div>",
+        f"<div class='nombre-mama-destacado'>{_titulo_mama_grande()}</div>",
         unsafe_allow_html=True,
     )
     st.markdown(
-        "<div class='subexplicacion-rutina'>Resumen según las veces que se ha levantado, "
-        "sugerencias orientativas y cuidado de mamá.</div>",
+        f"<div class='subexplicacion-rutina'>{mama}, lo estás haciendo muy bien 💛 · "
+        f"A continuación verás el resumen del sueño de {bebe} ({st.session_state.edad_meses} meses), "
+        "cómo ha descansado y un espacio para cuidar de ti.</div>",
         unsafe_allow_html=True,
-    )
-
-    st.caption(
-        f"**Perfil de mamá:** {st.session_state.nombre_mama} · {st.session_state.edad_mama} años"
     )
 
     c1, c2 = st.columns(2, gap="medium")
@@ -557,7 +570,7 @@ def pagina_monitor_y_mama():
         1 for e in st.session_state.eventos_sueno if e["evento"] == "Despertó"
     )
     m1, m2, m3 = st.columns(3)
-    m1.metric("Bebé y edad", f"{_etiqueta_bebe().capitalize()} · {st.session_state.edad_meses} meses")
+    m1.metric("Bebé y edad", f"{bebe.capitalize()} · {st.session_state.edad_meses} meses")
     m2.metric("Levantadas hoy", total_levantadas)
     m3.metric("Vasos de agua Mamá", st.session_state.vasos_agua)
 
@@ -569,7 +582,7 @@ def pagina_monitor_y_mama():
         st.session_state.edad_meses,
         st.session_state.eventos_sueno,
     )
-    st.subheader("📋 Resumen y Diagnóstico Orientativo")
+    st.subheader(f"📋 Resumen y Diagnóstico del Sueño de {bebe.capitalize()}")
     st.write(f"**Resumen:** {resumen}")
     st.info(f"**Diagnóstico según levantadas y edad:** {diagnostico}")
     st.write(f"**Recomendación para la próxima dormida:** {recomendacion}")
