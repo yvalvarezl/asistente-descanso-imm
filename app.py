@@ -223,7 +223,10 @@ def transcribir_nota_voz(audio_file) -> tuple[str | None, str]:
         texto = recognizer.recognize_google(audio_data, language="es-CO")
         return texto.strip(), "Transcripción completada."
     except sr.UnknownValueError:
-        return None, "No se pudo entender lo que dijiste en la nota de voz. Intenta hablar más claro o cerca del micrófono."
+        return (
+            None,
+            "No se pudo entender lo que dijiste en la nota de voz. Intenta hablar más claro o cerca del micrófono.",
+        )
     except sr.RequestError as exc:
         return None, f"No se pudo conectar con el servicio de reconocimiento de voz: {exc}"
     except Exception as exc:
@@ -719,13 +722,13 @@ def pagina_rutina_y_sonidos():
 
 
 # ---------------------------------------------------------
-# Ambiente 2: Resumen o diagnóstico / Cuidado mamá
+# Ambiente 2: Mamá · Historial y cuidado
 # ---------------------------------------------------------
 def pagina_monitor_y_mama():
     bebe = _etiqueta_bebe()
     mama = _etiqueta_mama()
 
-    st.title("🤱 CUNNA · Resumen o diagnóstico / Cuidado mamá")
+    st.title("🤱 CUNNA · Mamá · Historial y cuidado")
     st.markdown(
         f"<div class='nombre-mama-destacado'>{_titulo_mama_grande()}</div>",
         unsafe_allow_html=True,
@@ -828,7 +831,7 @@ def pagina_monitor_y_mama():
 pg1 = st.Page(pagina_rutina_y_sonidos, title="Rutina y Sonidos", icon="🌙")
 pg2 = st.Page(
     pagina_monitor_y_mama,
-    title="Resumen o diagnóstico / Cuidado mamá",
+    title="Mamá · Historial y cuidado",
     icon="🤱",
 )
 
