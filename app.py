@@ -1,15 +1,13 @@
-from io import BytesIO
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
-import wave
-import numpy as np
-import streamlit as st
 from gtts import gTTS
+import streamlit as st
 from mqtt_bridge import (
-    enviar_comando_mqtt,
-    leer_ultimo_estado_mqtt,
     TOPIC_CMD,
     TOPIC_ESTADO,
+    enviar_comando_mqtt,
+    leer_ultimo_estado_mqtt,
 )
 
 st.set_page_config(
@@ -19,891 +17,383 @@ st.set_page_config(
 )
 
 CARPETA_BASE = Path(__file__).parent
-RUTA_ESTRELLITA_RAIZ = CARPETA_BASE / "assetsestrellita_piano.mp3"
-RUTA_ESTRELLITA_ASSETS = CARPETA_BASE / "assets" / "estrellita_piano.mp3"
+RUTA_ESTRELLITA = (
+    CARPETA_BASE / "assetsestrellita_piano.mp3"
+    if (CARPETA_BASE / "assetsestrellita_piano.mp3").exists()
+    else CARPETA_BASE / "assets" / "estrellita_piano.mp3"
+)
 
-# ---------------------------------------------------------
-# Estilos suaves, botones grandes y baja carga cognitiva
-# ---------------------------------------------------------
 st.markdown(
     """
     <style>
-    .acompanando-destacado {
-        font-size: 1.32rem;
-        font-weight: 600;
-        line-height: 1.35;
-        margin-top: 0.15rem;
-        margin-bottom: 0.3rem;
-    }
-    .nombre-mama-destacado {
-        font-size: 1.85rem;
-        font-weight: 700;
-        line-height: 1.2;
-        margin-top: 0.2rem;
-        margin-bottom: 0.35rem;
-    }
-    .subexplicacion-rutina {
-        font-size: 0.98rem;
-        line-height: 1.5;
-        opacity: 0.88;
-        margin-bottom: 1.1rem;
-    }
-    .mensaje-box {
-        background-color: rgba(255, 255, 255, 0.04);
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        border-radius: 14px;
-        padding: 0.9rem 1.1rem;
-        margin-bottom: 0.75rem;
-    }
-    .transcripcion-box {
-        background-color: rgba(99, 102, 241, 0.10);
-        border: 1px solid rgba(99, 102, 241, 0.35);
+    .box-card {
+        border: 1px solid rgba(255, 255, 255, 0.15);
         border-radius: 12px;
-        padding: 0.75rem 1rem;
-        margin-top: 0.5rem;
+        padding: 0.85rem 1rem;
         margin-bottom: 0.75rem;
     }
-    .bocina-label {
-        font-size: 1.4rem;
+    .emoji-top {
         text-align: center;
-        padding-top: 0.3rem;
-    }
-    /* Botones principales más grandes con emojis destacados */
-    div[data-testid="stButton"] > button[kind="secondary"],
-    div[data-testid="stButton"] > button[kind="primary"] {
-        min-height: 4.4rem;
-        font-size: 1.15rem;
-        font-weight: 600;
-        border-radius: 14px;
-        padding: 0.75rem 1rem;
-    }
-    .emoji-gigante-barra {
-        display: flex;
-        justify-content: space-around;
-        font-size: 2.35rem;
+        font-size: 2.2rem;
         line-height: 1.1;
-        margin-bottom: 0.25rem;
-        user-select: none;
+    }
+    div[data-testid="stButton"] > button {
+        min-height: 3.6rem;
+        border-radius: 12px;
+        font-weight: 600;
     }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# ---------------------------------------------------------
-# Estado de sesión persistente entre ambientes
-# ---------------------------------------------------------
-if "fase_rutina" not in st.session_state:
-    st.session_state.fase_rutina = "EN_CALMA"
-if "sonido_activo" not in st.session_state:
-    st.session_state.sonido_activo = None  # "estrellita" | "ruido_blanco" | None
-if "nombre_bebe" not in st.session_state:
-    st.session_state.nombre_bebe = "Mi bebé"
-if "edad_meses" not in st.session_state:
-    st.session_state.edad_meses = 10
-if "nombre_mama" not in st.session_state:
-    st.session_state.nombre_mama = "Mamá"
-if "edad_mama" not in st.session_state:
-    st.session_state.edad_mama = 30
-if "eventos_sueno" not in st.session_state:
-    st.session_state.eventos_sueno = []
-if "vasos_agua" not in st.session_state:
-    st.session_state.vasos_agua = 0
-if "mostrar_historial_completo" not in st.session_state:
-    st.session_state.mostrar_historial_completo = False
-if "ultima_transcripcion_voz" not in st.session_state:
-    st.session_state.ultima_transcripcion_voz = None
-if "estado_transcripcion_voz" not in st.session_state:
-    st.session_state.estado_transcripcion_voz = None
-if "ultimo_mensaje" not in st.session_state:
-    st.session_state.ultimo_mensaje = (
-        "Bienvenida a CUNNA. Un espacio suave para acompañar el sueño y tu descanso."
-    )
-if "ultimo_estado_wokwi" not in st.session_state:
-    st.session_state.ultimo_estado_wokwi = None
-if "ultimo_detalle_mqtt" not in st.session_state:
-    st.session_state.ultimo_detalle_mqtt = None
+# Estado de sesión
+defaults = {
+    "fase_rutina": "EN_CALMA",
+    "sonido_activo": False,
+    "nombre_bebe": "Mi bebé",
+    "edad_meses": 10,
+    "nombre_mama": "Mamá",
+    "edad_mama": 30,
+    "eventos_sueno": [],
+    "vasos_agua": 0,
+    "mostrar_historial": False,
+    "transcripcion_voz": None,
+    "error_voz": None,
+    "ultimo_mensaje": "Bienvenida a CUNNA. Un espacio suave para acompañar el sueño y tu descanso.",
+    "ultimo_estado_wokwi": None,
+    "ultimo_detalle_mqtt": None,
+}
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
-
-# ---------------------------------------------------------
-# Barra lateral izquierda: Perfil del bebé y Perfil de mamá
-# ---------------------------------------------------------
+# Barra lateral
 with st.sidebar:
     st.header("👶 Perfil del Bebé")
-    st.caption("Personaliza los datos para adaptar los mensajes y el resumen.")
-
-    nombre_bebe_input = st.text_input(
-        "Nombre del bebé",
-        value=st.session_state.nombre_bebe,
-        placeholder="Ej.: Sofía, Mateo...",
-    )
-    st.session_state.nombre_bebe = (
-        nombre_bebe_input.strip() if nombre_bebe_input.strip() else "Mi bebé"
-    )
-
-    st.session_state.edad_meses = st.slider(
-        "Edad del bebé en meses",
-        min_value=0,
-        max_value=24,
-        value=st.session_state.edad_meses,
-        key="slider_sidebar_edad",
-    )
+    b_input = st.text_input("Nombre del bebé", value=st.session_state.nombre_bebe)
+    st.session_state.nombre_bebe = b_input.strip() or "Mi bebé"
+    st.session_state.edad_meses = st.slider("Edad (meses)", 0, 24, st.session_state.edad_meses)
 
     st.divider()
     st.header("🤱 Perfil de Mamá")
-    st.caption("Datos de acompañamiento y autocuidado diario.")
-
-    nombre_mama_input = st.text_input(
-        "Nombre de mamá",
-        value=st.session_state.nombre_mama,
-        placeholder="Ej.: Valeria, Camila...",
-    )
-    st.session_state.nombre_mama = (
-        nombre_mama_input.strip() if nombre_mama_input.strip() else "Mamá"
-    )
-
-    st.session_state.edad_mama = st.slider(
-        "Edad de mamá (años)",
-        min_value=15,
-        max_value=60,
-        value=st.session_state.edad_mama,
-        key="slider_sidebar_edad_mama",
-    )
-
-    st.divider()
-    st.markdown(f"**Bebé:** {st.session_state.nombre_bebe} ({st.session_state.edad_meses} meses)")
-    st.markdown(f"**Mamá:** {st.session_state.nombre_mama} ({st.session_state.edad_mama} años)")
+    m_input = st.text_input("Nombre de mamá", value=st.session_state.nombre_mama)
+    st.session_state.nombre_mama = m_input.strip() or "Mamá"
+    st.session_state.edad_mama = st.slider("Edad de mamá", 15, 60, st.session_state.edad_mama)
 
 
-def _etiqueta_bebe() -> str:
-    nombre = st.session_state.nombre_bebe.strip()
-    return nombre if nombre and nombre != "Mi bebé" else "tu bebé"
+def bebe_lbl() -> str:
+    n = st.session_state.nombre_bebe.strip()
+    return n if n and n != "Mi bebé" else "tu bebé"
 
 
-def _etiqueta_mama() -> str:
-    nombre = st.session_state.nombre_mama.strip()
-    return nombre if nombre and nombre != "Mamá" else "Mamá"
+def mama_lbl() -> str:
+    n = st.session_state.nombre_mama.strip()
+    return n if n and n != "Mamá" else "Mamá"
 
 
-def _titulo_mama_grande() -> str:
-    nombre = st.session_state.nombre_mama.strip()
-    if nombre and nombre != "Mamá":
-        return f"🤱 {nombre} · {st.session_state.edad_mama} años"
-    return f"🤱 Mamá · {st.session_state.edad_mama} años"
-
-
-def texto_acompanando_bebe() -> str:
-    return f"acompañando a {_etiqueta_bebe()} de {st.session_state.edad_meses} meses"
-
-
-# ---------------------------------------------------------
-# Funciones de audio (voz a texto + voz bajo demanda + loop)
-# ---------------------------------------------------------
-def transcribir_nota_voz(audio_file) -> tuple[str | None, str]:
-    """Convierte el audio grabado por el usuario en texto usando SpeechRecognition."""
+def transcribir_voz(audio_file) -> tuple[str | None, str | None]:
     if audio_file is None:
         return None, "No se grabó ningún audio."
-
     try:
         import speech_recognition as sr
-    except ImportError:
-        return (
-            None,
-            "Falta instalar `SpeechRecognition` en el entorno para transcribir la nota de voz.",
-        )
 
-    audio_bytes = audio_file.getvalue()
-    if not audio_bytes:
-        return None, "El archivo de audio está vacío."
-
-    recognizer = sr.Recognizer()
-    try:
-        with sr.AudioFile(BytesIO(audio_bytes)) as source:
-            audio_data = recognizer.record(source)
-        texto = recognizer.recognize_google(audio_data, language="es-CO")
-        return texto.strip(), "Transcripción completada."
-    except sr.UnknownValueError:
-        return (
-            None,
-            "No se pudo entender lo que dijiste en la nota de voz. Intenta hablar más claro o cerca del micrófono.",
-        )
-    except sr.RequestError as exc:
-        return None, f"No se pudo conectar con el servicio de reconocimiento de voz: {exc}"
+        r = sr.Recognizer()
+        with sr.AudioFile(BytesIO(audio_file.getvalue())) as src:
+            data = r.record(src)
+        return r.recognize_google(data, language="es-CO").strip(), None
     except Exception as exc:
-        return None, f"Error al procesar el audio grabado: {exc}"
+        return None, f"No se pudo transcribir el audio: {exc}"
 
 
 @st.cache_data(show_spinner=False)
-def generar_voz_gtts(texto: str) -> bytes | None:
+def voz_gtts(texto: str) -> bytes | None:
     try:
-        tts = gTTS(text=texto, lang="es")
         buf = BytesIO()
-        tts.write_to_fp(buf)
+        gTTS(text=texto, lang="es").write_to_fp(buf)
         buf.seek(0)
         return buf.read()
     except Exception:
         return None
 
 
-def _nota_suave(freq: float, duracion: float, sr: int = 16000, amp: float = 0.09) -> np.ndarray:
-    """Genera una nota de cuna cálida con armónicos suaves y envolvente sin clics."""
-    n = max(1, int(sr * duracion))
-    t = np.linspace(0, duracion, n, endpoint=False)
-    onda = (
-        0.75 * np.sin(2 * np.pi * freq * t)
-        + 0.20 * np.sin(2 * np.pi * (2 * freq) * t)
-        + 0.05 * np.sin(2 * np.pi * (3 * freq) * t)
-    )
-    ataque = min(int(0.06 * sr), n // 3)
-    liberacion = min(int(0.10 * sr), n // 3)
-    env = np.ones(n)
-    if ataque > 0:
-        env[:ataque] = np.linspace(0.0, 1.0, ataque)
-    if liberacion > 0:
-        env[-liberacion:] = np.linspace(1.0, 0.0, liberacion)
-    return amp * onda * env
+def mostrar_mensaje_y_audio(mensaje: str):
+    c1, c2 = st.columns([7, 3], vertical_alignment="center")
+    c1.markdown(f"<div class='box-card'>{mensaje}</div>", unsafe_allow_html=True)
+    audio = voz_gtts(mensaje)
+    if audio:
+        c2.audio(audio, format="audio/mp3")
 
 
-@st.cache_data(show_spinner=False)
-def generar_sonido_continuo(tipo: str, duracion_seg: float = 16.0, sr: int = 16000) -> bytes:
-    """Genera audio WAV continuo en bucle para respaldo de canción de cuna o ruido blanco."""
-    if tipo == "ruido_blanco":
-        t = np.linspace(0, duracion_seg, int(sr * duracion_seg), endpoint=False)
-        frecuencia_ciclo = 1.0 / duracion_seg
-        rng = np.random.default_rng(42)
-        ruido = rng.normal(0.0, 0.13, size=t.shape)
-        kernel = np.ones(14) / 14.0
-        onda = np.convolve(ruido, kernel, mode="same")
-        modulacion = 0.88 + 0.12 * np.sin(2 * np.pi * frecuencia_ciclo * t)
-        onda = onda * modulacion
+def mostrar_reproductor():
+    if not st.session_state.sonido_activo:
+        return
+    if RUTA_ESTRELLITA.exists():
+        st.caption("⭐ Estrellita al piano en bucle:")
+        st.audio(RUTA_ESTRELLITA.read_bytes(), format="audio/mp3", autoplay=True, loop=True)
     else:
-        notas = [
-            (261.63, 0.65),
-            (261.63, 0.65),
-            (392.00, 0.65),
-            (392.00, 0.65),
-            (440.00, 0.65),
-            (440.00, 0.65),
-            (392.00, 1.30),
-            (349.23, 0.65),
-            (349.23, 0.65),
-            (329.63, 0.65),
-            (329.63, 0.65),
-            (293.66, 0.65),
-            (293.66, 0.65),
-            (261.63, 1.45),
-        ]
-        segmentos = [_nota_suave(f, d, sr=sr, amp=0.095) for f, d in notas]
-        onda = np.concatenate(segmentos)
-
-    pcm = np.clip(onda * 32767, -32768, 32767).astype(np.int16)
-    buf = BytesIO()
-    with wave.open(buf, "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sr)
-        wf.writeframes(pcm.tobytes())
-    buf.seek(0)
-    return buf.read()
+        st.warning("No se encontró el archivo MP3 de Estrellita en el repositorio.")
+    if st.button("⏹️ Detener sonido", key="stop_audio"):
+        st.session_state.sonido_activo = False
+        st.rerun()
 
 
-def mostrar_mensaje_con_bocina(mensaje: str):
-    """Muestra el mensaje escrito y un control compacto de bocina (🔊) para escucharlo si se desea."""
-    col_txt, col_ico, col_aud = st.columns([6.5, 0.7, 2.8], vertical_alignment="center")
-    with col_txt:
-        st.markdown(f"<div class='mensaje-box'>{mensaje}</div>", unsafe_allow_html=True)
-    with col_ico:
-        st.markdown("<div class='bocina-label'>🔊</div>", unsafe_allow_html=True)
-    with col_aud:
-        audio_voz = generar_voz_gtts(mensaje)
-        if audio_voz:
-            st.audio(audio_voz, format="audio/mp3", autoplay=False)
-
-
-def renderizar_transcripcion_voz():
-    """Muestra abajo lo que el usuario dijo en su última nota de voz enviada."""
-    if st.session_state.ultima_transcripcion_voz:
-        st.markdown(
-            f"<div class='transcripcion-box'>🗣️ <strong>Lo que dijiste:</strong> "
-            f"“{st.session_state.ultima_transcripcion_voz}”</div>",
-            unsafe_allow_html=True,
-        )
-    elif st.session_state.estado_transcripcion_voz:
-        st.warning(st.session_state.estado_transcripcion_voz)
-
-
-def detener_sonido_bucle():
-    """Detiene manualmente el sonido activo en bucle."""
-    st.session_state.sonido_activo = None
-    st.session_state.ultimo_mensaje = (
-        f"Sonido en bucle detenido para {_etiqueta_bebe()}. Puedes activarlo cuando lo necesites."
-    )
-
-
-def renderizar_reproductor_continuo():
-    """Muestra el audio automático en loop según el estado actual de rutina/sueño."""
-    if st.session_state.sonido_activo == "estrellita":
-        archivo_piano = (
-            RUTA_ESTRELLITA_RAIZ
-            if RUTA_ESTRELLITA_RAIZ.exists()
-            else RUTA_ESTRELLITA_ASSETS
-            if RUTA_ESTRELLITA_ASSETS.exists()
-            else None
-        )
-        if archivo_piano is not None:
-            st.caption("⭐ Canción de cuna Estrellita al piano activa en bucle automático:")
-            st.audio(
-                archivo_piano.read_bytes(),
-                format="audio/mp3",
-                autoplay=True,
-                loop=True,
-            )
-        else:
-            st.warning(
-                "No se encontró `assetsestrellita_piano.mp3` ni `assets/estrellita_piano.mp3` en el repositorio; "
-                "reproduciendo melodía de respaldo."
-            )
-            st.audio(
-                generar_sonido_continuo("estrellita"),
-                format="audio/wav",
-                autoplay=True,
-                loop=True,
-            )
-        if st.button("⏹️ Detener sonido", key="btn_detener_sonido_estrellita"):
-            detener_sonido_bucle()
-            st.rerun()
-    elif st.session_state.sonido_activo == "ruido_blanco":
-        st.caption("🌊 Ruido blanco activo en bucle automático para el descanso:")
-        st.audio(
-            generar_sonido_continuo("ruido_blanco"),
-            format="audio/wav",
-            autoplay=True,
-            loop=True,
-        )
-        if st.button("⏹️ Detener sonido", key="btn_detener_sonido_ruido"):
-            detener_sonido_bucle()
-            st.rerun()
-
-
-def interpretar_intencion_sueno(texto: str) -> str:
-    t = texto.lower()
-    if any(k in t for k in ["despert", "llor", "arriba", "alerta", "levant"]):
-        return "DESPIERTO"
-    if any(k in t for k in ["dormid", "durmio", "durmió", "se durmió", "ruido blanco"]):
-        return "DORMIDO"
-    if any(k in t for k in ["agua", "sed", "hidratar", "tomar"]):
-        return "AGUA"
-    return "RUTINA"
-
-
-def registrar_evento_sueno(tipo_evento: str):
+def registrar_evento(tipo: str):
     ahora = datetime.now()
     st.session_state.eventos_sueno.append(
         {
             "fecha": ahora.strftime("%Y-%m-%d"),
-            "hora": ahora.strftime("%H:%M:%S"),
-            "ts": ahora.isoformat(),
-            "evento": tipo_evento,
+            "hora": ahora.strftime("%I:%M:%S %p"),
+            "ts": ahora,
+            "evento": tipo,
         }
     )
 
 
-def _parsear_ts(evento: dict) -> datetime | None:
-    if "ts" in evento:
-        try:
-            return datetime.fromisoformat(evento["ts"])
-        except ValueError:
-            pass
-    try:
-        hoy = datetime.now().strftime("%Y-%m-%d")
-        fecha_str = evento.get("fecha", hoy)
-        hora_str = evento.get("hora", "00:00:00")
-        formato = "%Y-%m-%d %H:%M:%S" if len(hora_str) > 5 else "%Y-%m-%d %H:%M"
-        return datetime.strptime(f"{fecha_str} {hora_str}", formato)
-    except ValueError:
-        return None
+def detectar_intencion(texto: str) -> str:
+    t = texto.lower()
+    if any(k in t for k in ["despert", "llor", "arriba", "levant"]):
+        return "DESPIERTO"
+    if any(k in t for k in ["dormid", "durmi", "descans"]):
+        return "DORMIDO"
+    if any(k in t for k in ["agua", "sed", "hidrat"]):
+        return "AGUA"
+    return "RUTINA"
 
 
-def _hora_legible(evento: dict) -> str:
-    dt = _parsear_ts(evento)
-    if dt is not None:
-        return dt.strftime("%I:%M:%S %p")
-    return evento.get("hora", "")
+def activar_estado(estado: str, etiqueta_evento: str | None = None):
+    st.session_state.fase_rutina = estado
+    bebe, mama = bebe_lbl(), mama_lbl()
+    if etiqueta_evento:
+        registrar_evento(etiqueta_evento)
 
-
-def analizar_ventanas_y_sueno(
-    nombre_bebe: str, edad_meses: int, eventos: list[dict]
-) -> dict:
-    """Evalúa ventanas de sueño y despertares seguidos con texto simple y claro."""
-    bebe = nombre_bebe.strip() if nombre_bebe.strip() and nombre_bebe != "Mi bebé" else "tu bebé"
-    mama = _etiqueta_mama()
-
-    if edad_meses <= 3:
-        ventana_destacada = "45–90 min"
-        ventana_texto = "ventanas cortas (entre 45 y 90 minutos)"
-        rafaga_corta_min = 35
-    elif edad_meses <= 6:
-        ventana_destacada = "1.5–2.5 h"
-        ventana_texto = "ventanas moderadas (entre 1 hora y media y 2 horas y media)"
-        rafaga_corta_min = 40
-    elif edad_meses <= 12:
-        ventana_destacada = "2.5–3.5 h"
-        ventana_texto = "ventanas de 2 horas y media a 3 horas y media"
-        rafaga_corta_min = 45
+    mensajes = {
+        "RUTINA": f"Iniciamos la rutina de sueño para {bebe} y activamos la canción de cuna.",
+        "DORMIDO": f"{bebe.capitalize()} dormido registrado. Acompañando su descanso.",
+        "DESPIERTO": f"Se registró que {bebe} despertó. Ánimo, {mama}.",
+        "AGUA": None,
+    }
+    if estado == "AGUA":
+        st.session_state.vasos_agua += 1
+        st.session_state.ultimo_mensaje = (
+            f"¡Bien hecho, {mama}! Llevas {st.session_state.vasos_agua} vasos de agua hoy."
+        )
     else:
-        ventana_destacada = "3–4.5 h"
-        ventana_texto = "ventanas más amplias (entre 3 y 4 horas y media)"
-        rafaga_corta_min = 45
+        st.session_state.sonido_activo = estado in ("RUTINA", "DORMIDO")
+        st.session_state.ultimo_mensaje = mensajes.get(estado, "Estado actualizado.")
 
-    eventos_con_dt = []
-    for ev in eventos:
-        dt = _parsear_ts(ev)
-        if dt is not None:
-            eventos_con_dt.append((dt, ev["evento"]))
-    eventos_con_dt.sort(key=lambda x: x[0])
-
-    despertares_dt = [dt for dt, tipo in eventos_con_dt if tipo == "Despertó"]
-    dormidas_dt = [dt for dt, tipo in eventos_con_dt if tipo == "Bebé dormido"]
-
-    intervalos_despertares = [
-        (despertares_dt[i] - despertares_dt[i - 1]).total_seconds() / 60.0
-        for i in range(1, len(despertares_dt))
-    ]
-    rafagas_cortas = [m for m in intervalos_despertares if m <= rafaga_corta_min]
-    menor_intervalo = min(intervalos_despertares) if intervalos_despertares else None
-
-    ultimo_dt, ultimo_tipo = eventos_con_dt[-1] if eventos_con_dt else (None, None)
-    mins_desde_ultimo = (
-        (datetime.now() - ultimo_dt).total_seconds() / 60.0 if ultimo_dt else None
+    st.session_state.ultimo_detalle_mqtt = enviar_comando_mqtt(
+        estado=estado, origen="cunna_streamlit"
     )
+    estado_wk = leer_ultimo_estado_mqtt(timeout_seg=1.5)
+    if estado_wk is not None:
+        st.session_state.ultimo_estado_wokwi = estado_wk
 
-    if not eventos_con_dt:
+
+def analizar_sueno(edad: int, eventos: list[dict]) -> dict:
+    bebe, mama = bebe_lbl(), mama_lbl()
+    if edad <= 3:
+        ventana, lim = "45–90 min", 35
+    elif edad <= 6:
+        ventana, lim = "1.5–2.5 h", 40
+    elif edad <= 12:
+        ventana, lim = "2.5–3.5 h", 45
+    else:
+        ventana, lim = "3–4.5 h", 45
+
+    ordenados = sorted(
+        [(e["ts"], e["evento"]) for e in eventos if isinstance(e.get("ts"), datetime)],
+        key=lambda x: x[0],
+    )
+    desp = [dt for dt, ev in ordenados if ev == "Despertó"]
+    dorm = [dt for dt, ev in ordenados if ev == "Bebé dormido"]
+
+    if not ordenados:
         return {
-            "ventana_destacada": ventana_destacada,
-            "estado_corto": "Sin registros aún",
-            "resumen": f"Hoy todavía no has registrado despertares ni dormidas para {bebe}.",
-            "diagnostico": (
-                f"Para {edad_meses} meses, la referencia habitual es {ventana_texto}. "
-                "Lo más importante es ver qué tan seguidos ocurren los despertares y cómo van las ventanas."
-            ),
-            "recomendacion": (
-                f"Anota cuándo empieza la rutina, cuándo se duerme {bebe} y cuándo despierta para ver "
-                "si el descanso es continuo o se corta muy rápido."
-            ),
+            "ventana": ventana,
+            "estado": "Sin registros",
+            "resumen": f"Aún no hay registros hoy para {bebe}.",
+            "observacion": f"Referencia habitual para {edad} meses: {ventana}.",
+            "sugerencia": f"Registra rutinas, dormidas y despertares de {bebe} para observar su ritmo.",
         }
 
-    estado_actual = ""
-    if ultimo_tipo == "Despertó" and mins_desde_ultimo is not None:
-        estado_actual = f" Ahora lleva cerca de {int(round(mins_desde_ultimo))} minutos despierto/a."
-    elif ultimo_tipo == "Bebé dormido" and mins_desde_ultimo is not None:
-        estado_actual = f" Ahora lleva cerca de {int(round(mins_desde_ultimo))} minutos dormido/a."
+    intervalos = [(desp[i] - desp[i - 1]).total_seconds() / 60 for i in range(1, len(desp))]
+    cortos = [m for m in intervalos if m <= lim]
+    resumen = f"Hoy: {len(desp)} despertares y {len(dorm)} dormidas para {bebe}."
 
-    resumen = (
-        f"Hoy se han registrado {len(despertares_dt)} despertares y {len(dormidas_dt)} dormidas "
-        f"para {bebe}.{estado_actual}"
-    )
-
-    if rafagas_cortas:
-        estado_corto = "Despertares muy seguidos"
-        diagnostico = (
-            f"Se notan despertares muy seguidos (uno de ellos a los {int(round(menor_intervalo))} minutos). "
-            f"Que {bebe} se levante dos veces en poco tiempo —como media hora— no suele ser ideal en esta etapa "
-            f"({ventana_texto}) y puede indicar que el descanso se está cortando antes de tiempo."
-        )
-        recomendacion = (
-            f"Revisa si {bebe} llegó muy cansado a dormir, si el cuarto está tranquilo o si algún estímulo "
-            f"lo despertó pronto; {mama}, toma un respiro breve y observa si vuelve a repetirse."
-        )
-    elif len(despertares_dt) >= 2 and menor_intervalo is not None and menor_intervalo < 75:
-        estado_corto = "Intervalos cortos"
-        diagnostico = (
-            f"Hubo un despertar en un lapso corto ({int(round(menor_intervalo))} minutos entre levantadas). "
-            f"Para {edad_meses} meses, la referencia general es {ventana_texto}."
-        )
-        recomendacion = (
-            f"Cuida que {bebe} no pase demasiado despierto antes de la próxima siesta y mantén un cierre de rutina tranquilo."
-        )
-    else:
-        estado_corto = "Ritmo tranquilo"
-        diagnostico = (
-            f"Por ahora no se ven despertares repetidos en intervalos muy cortos. "
-            f"Referencia general para {edad_meses} meses: {ventana_texto}."
-        )
-        recomendacion = (
-            f"Sigue con un ritmo suave y predecible para {bebe}, y aprovecha las pausas para que {mama} tome agua y descanse."
-        )
-
+    if cortos:
+        return {
+            "ventana": ventana,
+            "estado": "Despertares seguidos",
+            "resumen": resumen,
+            "observacion": f"Se detectó un intervalo corto ({int(round(min(cortos)))} min) entre despertares.",
+            "sugerencia": f"Revisa el ambiente y el cansancio previo de {bebe}; {mama}, toma un respiro breve.",
+        }
     return {
-        "ventana_destacada": ventana_destacada,
-        "estado_corto": estado_corto,
+        "ventana": ventana,
+        "estado": "Ritmo estable",
         "resumen": resumen,
-        "diagnostico": diagnostico,
-        "recomendacion": recomendacion,
+        "observacion": f"Sin despertares repetidos muy seguidos. Referencia para {edad} meses: {ventana}.",
+        "sugerencia": f"Mantén rutinas tranquilas para {bebe} y recuerda hidratarte, {mama}.",
     }
 
 
-def evaluar_hidratacion_y_autocuidado(vasos: int, nombre_mama: str) -> tuple[str, str, str]:
-    """Evalúa el estado de hidratación según vasos registrados y ofrece recomendaciones para mamá."""
-    mama = nombre_mama.strip() if nombre_mama.strip() and nombre_mama != "Mamá" else "Mamá"
-    meta_diaria = 8
-
+def evaluar_agua(vasos: int) -> tuple[str, str]:
+    mama = mama_lbl()
     if vasos == 0:
-        estado = f"⚠️ Aún no has registrado vasos de agua hoy ({vasos}/{meta_diaria})."
-        mensaje = (
-            f"{mama}, te estás hidratando mal por ahora: llevas 0 vasos registrados. "
-            "Tener una botella cerca ayuda mucho cuando estás pendiente del bebé."
-        )
-        recomendaciones = (
-            "• Toma 1 vaso de agua ahora mismo mientras revisas el resumen.\n"
-            "• Deja un vaso o termo visible donde sueles sentarte con tu bebé.\n"
-            "• Acompaña tu hidratación con un snack sencillo y una respiración pausada."
-        )
-    elif vasos < 4:
-        estado = f"🟡 Hidratación baja por ahora ({vasos}/{meta_diaria} vasos)."
-        mensaje = (
-            f"{mama}, vas empezando, pero aún te estás hidratando poco ({vasos} de {meta_diaria} vasos). "
-            "Un par de sorbos más entre rutinas marcarán la diferencia."
-        )
-        recomendaciones = (
-            f"• Proponte completar al menos {4 - vasos} vasos más antes de la tarde/noche.\n"
-            "• Toma agua justo después de cada despertar o cambio de rutina.\n"
-            "• Si sientes cansancio acumulado, estira hombros y cuello por 1 minuto."
-        )
-    elif vasos < meta_diaria:
-        estado = f"💧 Hidratación en buen camino ({vasos}/{meta_diaria} vasos)."
-        mensaje = (
-            f"¡Muy bien, {mama}! Te estás hidratando bien: llevas {vasos} vasos registrados y estás "
-            f"a {meta_diaria - vasos} de tu meta diaria de {meta_diaria}."
-        )
-        recomendaciones = (
-            f"• Sigue así: vas por buen ritmo con {vasos} vasos.\n"
-            "• Aprovecha los momentos de calma del bebé para beber un vaso más.\n"
-            "• Recuerda comer algo nutritivo y darte un pequeño respiro mental."
-        )
-    else:
-        estado = f"✅ ¡Excelente hidratación hoy! ({vasos}/{meta_diaria}+ vasos)."
-        mensaje = (
-            f"¡Qué gran cuidado, {mama}! Te estás hidratando muy bien con {vasos} vasos registrados hoy. "
-            "Cuidarte también es sostener a tu bebé."
-        )
-        recomendaciones = (
-            "• Mantén este hábito constante durante el resto del día.\n"
-            "• Prioriza el descanso cuando el bebé duerma si tienes pendientes no urgentes.\n"
-            "• Pide apoyo si necesitas una pausa real para comer o descansar."
-        )
-
-    return estado, mensaje, recomendaciones
+        return f"⚠️ Sin vasos registrados ({vasos}/8)", f"{mama}, aún no registras agua hoy."
+    if vasos < 4:
+        return f"🟡 Hidratación baja ({vasos}/8)", f"{mama}, llevas {vasos} vasos; intenta tomar un poco más."
+    if vasos < 8:
+        return f"💧 Buen avance ({vasos}/8)", f"¡Muy bien, {mama}! Llevas {vasos} de 8 vasos."
+    return f"✅ Meta cumplida ({vasos}/8+)", f"¡Excelente hidratación hoy, {mama}!"
 
 
-def construir_resumen_txt(
-    analisis: dict, eventos_hoy: list[dict], vasos_agua: int, estado_hidra: str
-) -> str:
-    """Genera el texto descargable del resumen del día."""
-    bebe = _etiqueta_bebe()
-    mama = _etiqueta_mama()
-    ahora_str = datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
-    lineas = [
-        "CUNNA · RESUMEN DE SUEÑO, VENTANAS Y CUIDADO",
-        f"Generado: {ahora_str}",
-        f"Bebé: {bebe} ({st.session_state.edad_meses} meses)",
-        f"Mamá: {mama} ({st.session_state.edad_mama} años)",
-        "-" * 50,
-        f"Ventana de referencia: {analisis['ventana_destacada']}",
-        f"Lectura de hoy: {analisis['estado_corto']}",
-        f"Resumen: {analisis['resumen']}",
-        f"Qué se observa: {analisis['diagnostico']}",
-        f"Para la próxima dormida: {analisis['recomendacion']}",
-        "-" * 50,
-        "Registros de hoy:",
-    ]
-    if eventos_hoy:
-        for ev in eventos_hoy:
-            lineas.append(f"  - {_hora_legible(ev)} · {ev['evento']}")
-    else:
-        lineas.append("  - Sin registros de hoy.")
-
-    lineas.extend(
-        [
-            "-" * 50,
-            f"Hidratación de {mama}: {vasos_agua} vasos registrados ({estado_hidra})",
-        ]
-    )
-    return "\n".join(lineas)
-
-
-def activar_estado_cunna(estado_mqtt: str, etiqueta_evento: str | None = None):
-    st.session_state.fase_rutina = estado_mqtt
-    bebe = _etiqueta_bebe()
-    mama = _etiqueta_mama()
-
-    if etiqueta_evento:
-        registrar_evento_sueno(etiqueta_evento)
-
-    if estado_mqtt == "RUTINA":
-        st.session_state.sonido_activo = "estrellita"
-        mensaje = (
-            f"Comenzamos la rutina de sueño para {bebe}. Se activó la canción de cuna en bucle; "
-            f"cuando {bebe} se duerma puedes pasar a ruido blanco."
-        )
-    elif estado_mqtt == "DORMIDO":
-        st.session_state.sonido_activo = "ruido_blanco"
-        mensaje = (
-            f"{bebe.capitalize()} dormido registrado. Cambiamos automáticamente a ruido blanco en bucle "
-            "para acompañar su descanso."
-        )
-    elif estado_mqtt == "DESPIERTO":
-        st.session_state.sonido_activo = None
-        mensaje = (
-            f"Se registró que {bebe} se levantó. Respira profundo, {mama}; aquí tienes el registro "
-            "y el resumen de ventanas listos."
-        )
-    elif estado_mqtt == "AGUA":
-        st.session_state.vasos_agua += 1
-        mensaje = (
-            f"¡Qué buen cuidado, {mama}! Llevas {st.session_state.vasos_agua} vasos de agua hoy. "
-            "Tu bienestar también importa."
-        )
-    else:
-        mensaje = "Estado actualizado en CUNNA."
-
-    st.session_state.ultimo_mensaje = mensaje
-
-    ok_envio, detalle_envio = enviar_comando_mqtt(estado=estado_mqtt, origen="cunna_streamlit")
-    st.session_state.ultimo_detalle_mqtt = (ok_envio, detalle_envio)
-    estado_wokwi = leer_ultimo_estado_mqtt(timeout_seg=1.5)
-    if estado_wokwi is not None:
-        st.session_state.ultimo_estado_wokwi = estado_wokwi
-
-
-def renderizar_estado_mqtt():
-    if st.session_state.ultimo_detalle_mqtt:
-        ok_envio, detalle_envio = st.session_state.ultimo_detalle_mqtt
-        if ok_envio:
-            st.success(detalle_envio)
-        else:
-            st.warning(detalle_envio)
-
-    if st.session_state.ultimo_estado_wokwi:
-        st.info(f"Confirmación desde Wokwi {TOPIC_ESTADO}: {st.session_state.ultimo_estado_wokwi}")
-    else:
-        st.caption(
-            f"Sin lectura nueva en {TOPIC_ESTADO} en este instante. "
-            "Verifica que tu simulación en Wokwi esté corriendo y conectada al broker."
-        )
-
-
-# ---------------------------------------------------------
-# Ambiente 1: Rutina de Sueño y Sonidos
-# ---------------------------------------------------------
-def pagina_rutina_y_sonidos():
-    bebe = _etiqueta_bebe()
+# Ambiente 1
+def pagina_rutina():
+    bebe = bebe_lbl()
     st.title("🌙 CUNNA · Rutina de Sueño y Sonidos")
-    st.markdown(
-        f"<div class='acompanando-destacado'>Acompañando a {bebe} de {st.session_state.edad_meses} meses</div>",
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        "<div class='subexplicacion-rutina'>Activa la rutina con canción de cuna en bucle, "
-        "pasa a ruido blanco al dormir y escucha los mensajes solo cuando tú lo decidas.</div>",
-        unsafe_allow_html=True,
-    )
+    st.caption(f"Acompañando a {bebe} ({st.session_state.edad_meses} meses)")
 
-    col_a, col_b, col_c = st.columns(3, gap="medium")
-    with col_a:
-        st.markdown("<div class='emoji-gigante-barra'>🎶</div>", unsafe_allow_html=True)
-        btn_rutina = st.button("Comenzar rutina", use_container_width=True)
-    with col_b:
-        st.markdown("<div class='emoji-gigante-barra'>💤</div>", unsafe_allow_html=True)
-        btn_dormido = st.button("Bebé dormido", use_container_width=True)
-    with col_c:
-        st.markdown("<div class='emoji-gigante-barra'>☀️</div>", unsafe_allow_html=True)
-        btn_desperto = st.button("Despertó", use_container_width=True)
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown("<div class='emoji-top'>🎶</div>", unsafe_allow_html=True)
+        b_rut = st.button("Comenzar rutina", use_container_width=True)
+    with c2:
+        st.markdown("<div class='emoji-top'>💤</div>", unsafe_allow_html=True)
+        b_dor = st.button("Bebé dormido", use_container_width=True)
+    with c3:
+        st.markdown("<div class='emoji-top'>☀️</div>", unsafe_allow_html=True)
+        b_des = st.button("Despertó", use_container_width=True)
 
-    texto_comando = st.text_input(
-        "O escribe qué está pasando:",
-        placeholder=f"Ej.: comenzar rutina de sueño, {bebe} dormido, despertó o tengo sed",
-    )
+    txt = st.text_input("O escribe qué está pasando:", placeholder=f"Ej.: {bebe} dormido o despertó")
+    col_v, col_b = st.columns([3, 1], vertical_alignment="bottom")
+    audio_in = col_v.audio_input("O graba una nota de voz:")
+    enviar = col_b.button("Enviar nota", type="primary", use_container_width=True)
 
-    col_audio, col_enviar = st.columns([3, 1], gap="small", vertical_alignment="bottom")
-    with col_audio:
-        audio_entrada = st.audio_input("O graba una nota de voz:")
-    with col_enviar:
-        enviar_nota = st.button("Enviar nota", type="primary", use_container_width=True)
-
-    if audio_entrada is not None:
-        st.caption("Audio listo. Pulsa 'Enviar nota' para transcribirlo y sincronizar.")
-
-    if btn_rutina:
-        activar_estado_cunna("RUTINA", "Inicio de rutina de sueño")
-    elif btn_dormido:
-        activar_estado_cunna("DORMIDO", "Bebé dormido")
-    elif btn_desperto:
-        activar_estado_cunna("DESPIERTO", "Despertó")
-    elif enviar_nota:
-        texto_efectivo = texto_comando.strip()
-        if audio_entrada is not None:
-            with st.spinner("Transcribiendo tu nota de voz..."):
-                texto_voz, estado_voz = transcribir_nota_voz(audio_entrada)
-            st.session_state.ultima_transcripcion_voz = texto_voz
-            st.session_state.estado_transcripcion_voz = None if texto_voz else estado_voz
-            if texto_voz and not texto_efectivo:
-                texto_efectivo = texto_voz
-
-        if not texto_efectivo and audio_entrada is None:
-            st.session_state.estado_transcripcion_voz = (
-                "Escribe un comando o graba una nota de voz antes de pulsar 'Enviar nota'."
-            )
+    if b_rut:
+        activar_estado("RUTINA", "Inicio de rutina de sueño")
+    elif b_dor:
+        activar_estado("DORMIDO", "Bebé dormido")
+    elif b_des:
+        activar_estado("DESPIERTO", "Despertó")
+    elif enviar:
+        texto_final = txt.strip()
+        if audio_in is not None:
+            voz_txt, err = transcribir_voz(audio_in)
+            st.session_state.transcripcion_voz = voz_txt
+            st.session_state.error_voz = err
+            if voz_txt and not texto_final:
+                texto_final = voz_txt
+        if not texto_final and audio_in is None:
+            st.session_state.error_voz = "Escribe un mensaje o graba una nota de voz."
         else:
-            intencion = interpretar_intencion_sueno(texto_efectivo or "rutina")
-            etiqueta_map = {
+            intent = detectar_intencion(texto_final or "rutina")
+            ev_map = {
                 "RUTINA": "Inicio de rutina de sueño",
                 "DORMIDO": "Bebé dormido",
                 "DESPIERTO": "Despertó",
-                "AGUA": None,
             }
-            activar_estado_cunna(intencion, etiqueta_map.get(intencion))
+            activar_estado(intent, ev_map.get(intent))
 
     st.divider()
     st.caption(f"Estado actual: {st.session_state.fase_rutina}")
-    renderizar_transcripcion_voz()
-    mostrar_mensaje_con_bocina(st.session_state.ultimo_mensaje)
-    renderizar_reproductor_continuo()
-    renderizar_estado_mqtt()
+    if st.session_state.transcripcion_voz:
+        st.info(f"🗣️ Dijiste: “{st.session_state.transcripcion_voz}”")
+    elif st.session_state.error_voz:
+        st.warning(st.session_state.error_voz)
+
+    mostrar_mensaje_y_audio(st.session_state.ultimo_mensaje)
+    mostrar_reproductor()
+
+    if st.session_state.ultimo_detalle_mqtt:
+        ok, det = st.session_state.ultimo_detalle_mqtt
+        (st.success if ok else st.warning)(det)
+    if st.session_state.ultimo_estado_wokwi:
+        st.info(f"Wokwi ({TOPIC_ESTADO}): {st.session_state.ultimo_estado_wokwi}")
 
 
-# ---------------------------------------------------------
-# Ambiente 2: Mamá · Historial y cuidado
-# ---------------------------------------------------------
-def pagina_monitor_y_mama():
-    bebe = _etiqueta_bebe()
-    mama = _etiqueta_mama()
-
+# Ambiente 2
+def pagina_mama():
+    bebe, mama = bebe_lbl(), mama_lbl()
     st.title("🤱 CUNNA · Mamá · Historial y cuidado")
-    st.markdown(
-        f"<div class='nombre-mama-destacado'>{_titulo_mama_grande()}</div>",
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        f"<div class='subexplicacion-rutina'>{mama}, lo estás haciendo muy bien 💛 · "
-        f"A continuación verás cómo van las ventanas y el descanso de {bebe} ({st.session_state.edad_meses} meses) "
-        "y un espacio pensado para tu hidratación y cuidado.</div>",
-        unsafe_allow_html=True,
-    )
+    st.subheader(f"{mama} · {st.session_state.edad_mama} años")
 
-    analisis = analizar_ventanas_y_sueno(
-        st.session_state.nombre_bebe,
-        st.session_state.edad_meses,
-        st.session_state.eventos_sueno,
-    )
-
+    analisis = analizar_sueno(st.session_state.edad_meses, st.session_state.eventos_sueno)
     m1, m2 = st.columns(2)
-    m1.metric("Ventana de referencia", analisis["ventana_destacada"])
-    m2.metric("Lectura de hoy", analisis["estado_corto"])
+    m1.metric("Ventana de referencia", analisis["ventana"])
+    m2.metric("Lectura de hoy", analisis["estado"])
 
-    st.subheader(f"📋 Ventanas y Resumen del Sueño de {bebe.capitalize()}")
     st.write(f"**Resumen:** {analisis['resumen']}")
-    st.info(f"**Qué se observa:** {analisis['diagnostico']}")
-    st.write(f"**Para la próxima dormida:** {analisis['recomendacion']}")
-    st.caption(
-        "Nota: orientación organizativa y de referencia general según edad; "
-        "no constituye diagnóstico médico ni reemplaza la orientación pediátrica."
-    )
+    st.info(f"**Qué se observa:** {analisis['observacion']}")
+    st.write(f"**Para la próxima dormida:** {analisis['sugerencia']}")
+    st.caption("Referencia organizativa general; no reemplaza orientación médica.")
 
-    hoy_str = datetime.now().strftime("%Y-%m-%d")
-    eventos_hoy = [e for e in st.session_state.eventos_sueno if e.get("fecha") == hoy_str]
-    eventos_otros_dias = [e for e in st.session_state.eventos_sueno if e.get("fecha") != hoy_str]
+    hoy = datetime.now().strftime("%Y-%m-%d")
+    ev_hoy = [e for e in st.session_state.eventos_sueno if e.get("fecha") == hoy]
+    ev_otros = [e for e in st.session_state.eventos_sueno if e.get("fecha") != hoy]
 
     st.markdown("**🕒 Registros de hoy:**")
-    if eventos_hoy:
-        for item in reversed(eventos_hoy):
-            st.write(f"- **{_hora_legible(item)}** · {item['evento']}")
+    if ev_hoy:
+        for item in reversed(ev_hoy):
+            st.write(f"- **{item['hora']}** · {item['evento']}")
     else:
-        st.caption("Aún no hay registros de hoy.")
+        st.caption("Sin registros hoy.")
 
-    estado_hidra, msg_hidra, recs_mama = evaluar_hidratacion_y_autocuidado(
-        st.session_state.vasos_agua, st.session_state.nombre_mama
+    estado_agua, msg_agua = evaluar_agua(st.session_state.vasos_agua)
+    resumen_txt = "\n".join(
+        [
+            f"CUNNA - Resumen ({hoy}) | Bebé: {bebe} ({st.session_state.edad_meses}m) | Mamá: {mama}",
+            f"Ventana: {analisis['ventana']} | Estado: {analisis['estado']}",
+            analisis["resumen"],
+            analisis["observacion"],
+            analisis["sugerencia"],
+            "Registros de hoy:",
+            *[f"- {e['hora']} · {e['evento']}" for e in ev_hoy],
+            f"Agua: {st.session_state.vasos_agua} vasos ({estado_agua})",
+        ]
     )
-    resumen_txt = construir_resumen_txt(
-        analisis, eventos_hoy, st.session_state.vasos_agua, estado_hidra
+
+    b1, b2, b3 = st.columns(3)
+    lbl_hist = "🙈 Ocultar historial" if st.session_state.mostrar_historial else "📜 Ver historial"
+    if b1.button(lbl_hist, use_container_width=True):
+        st.session_state.mostrar_historial = not st.session_state.mostrar_historial
+        st.rerun()
+    if b2.button("🧹 Limpiar hoy", use_container_width=True):
+        st.session_state.eventos_sueno = ev_otros
+        st.rerun()
+    b3.download_button(
+        "📥 Descargar .txt",
+        data=resumen_txt,
+        file_name=f"resumen_cunna_{hoy}.txt",
+        mime="text/plain",
+        use_container_width=True,
     )
 
-    col_acc1, col_acc2, col_acc3 = st.columns(3, gap="small")
-    with col_acc1:
-        texto_btn_hist = (
-            "🙈 Ocultar historial"
-            if st.session_state.mostrar_historial_completo
-            else "📜 Ver historial de registros"
-        )
-        if st.button(texto_btn_hist, key="btn_toggle_historial", use_container_width=True):
-            st.session_state.mostrar_historial_completo = not st.session_state.mostrar_historial_completo
-            st.rerun()
-
-    with col_acc2:
-        if st.button("🧹 Limpiar registros de hoy", key="btn_limpiar_hoy", use_container_width=True):
-            st.session_state.eventos_sueno = eventos_otros_dias
-            st.rerun()
-
-    with col_acc3:
-        st.download_button(
-            label="📥 Descargar resumen (.txt)",
-            data=resumen_txt,
-            file_name=f"resumen_cunna_{hoy_str}.txt",
-            mime="text/plain",
-            use_container_width=True,
-        )
-
-    if st.session_state.mostrar_historial_completo:
-        st.markdown("#### 📜 Historial de registros")
-        if not st.session_state.eventos_sueno:
-            st.caption("No hay registros guardados todavía.")
-        else:
-            if eventos_hoy:
-                st.markdown("**Hoy:**")
-                for item in reversed(eventos_hoy):
-                    st.write(f"- {item['fecha']} · **{_hora_legible(item)}** · {item['evento']}")
-            if eventos_otros_dias:
-                st.markdown("**Días anteriores:**")
-                for item in reversed(eventos_otros_dias):
-                    st.write(f"- {item['fecha']} · **{_hora_legible(item)}** · {item['evento']}")
-            else:
-                st.caption("No hay registros de otros días guardados en esta sesión.")
+    if st.session_state.mostrar_historial:
+        st.markdown("#### 📜 Historial completo")
+        for item in reversed(st.session_state.eventos_sueno):
+            st.write(f"- {item.get('fecha', '')} · **{item['hora']}** · {item['evento']}")
 
     st.divider()
-
-    # Registro de vasos de agua de mamá + diagnóstico de hidratación y recomendaciones a la par
-    st.subheader(f"💧 Hidratación y Cuidado de {mama}")
-    col_agua_reg, col_agua_eval = st.columns([1, 1.5], gap="large")
-
-    with col_agua_reg:
-        st.metric("Vasos de agua hoy", f"{st.session_state.vasos_agua} 💧")
-        st.markdown("<div class='emoji-gigante-barra'>💧</div>", unsafe_allow_html=True)
-        if st.button("+1 Vaso de agua", type="primary", use_container_width=True):
-            activar_estado_cunna("AGUA", None)
-            st.rerun()
-
-    with col_agua_eval:
-        st.markdown(f"**Estado de hidratación:** {estado_hidra}")
-        st.write(msg_hidra)
-        st.markdown("**Recomendaciones para ti:**")
-        st.markdown(recs_mama)
+    st.subheader(f"💧 Hidratación de {mama}")
+    ca1, ca2 = st.columns([1, 2], vertical_alignment="center")
+    ca1.metric("Vasos hoy", f"{st.session_state.vasos_agua} 💧")
+    if ca1.button("+1 Vaso de agua", type="primary", use_container_width=True):
+        activar_estado("AGUA")
+        st.rerun()
+    ca2.markdown(f"**{estado_agua}**")
+    ca2.write(msg_agua)
 
     st.divider()
-    mostrar_mensaje_con_bocina(st.session_state.ultimo_mensaje)
-    renderizar_reproductor_continuo()
-
-    st.divider()
-    st.subheader("Conexión MQTT con Wokwi")
-    st.write(f"**Comandos:** {TOPIC_CMD} · **Estado:** {TOPIC_ESTADO}")
-    if st.session_state.ultimo_estado_wokwi:
-        st.json(st.session_state.ultimo_estado_wokwi)
+    mostrar_mensaje_y_audio(st.session_state.ultimo_mensaje)
+    st.caption(f"MQTT → Cmd: {TOPIC_CMD} | Estado: {TOPIC_ESTADO}")
 
 
-pg1 = st.Page(pagina_rutina_y_sonidos, title="Rutina y Sonidos", icon="🌙")
-pg2 = st.Page(
-    pagina_monitor_y_mama,
-    title="Mamá · Historial y cuidado",
-    icon="🤱",
+nav = st.navigation(
+    [
+        st.Page(pagina_rutina, title="Rutina y Sonidos", icon="🌙"),
+        st.Page(pagina_mama, title="Mamá · Historial y cuidado", icon="🤱"),
+    ]
 )
-
-nav = st.navigation([pg1, pg2])
 nav.run()
